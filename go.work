@@ -7,4 +7,5 @@ use (
 	./fs/core
 	./fs/fstest
 	./fs/minio
+	./git
 )
