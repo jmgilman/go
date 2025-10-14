@@ -13,4 +13,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Intial release
 
-[0.0.1]: https://github.com/jmgilman/go/releases/tag/fs/core/v0.1.0
+[0.0.1]: https://github.com/jmgilman/go/releases/tag/fs/fstest/v0.1.0
