@@ -4,4 +4,5 @@ use (
 	./fs/billy
 	./fs/core
 	./fs/fstest
+	./fs/minio
 )
