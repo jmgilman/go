@@ -1,6 +1,7 @@
 go 1.24.2
 
 use (
+	./errors
 	./fs/billy
 	./fs/core
 	./fs/fstest
