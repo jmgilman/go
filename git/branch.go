@@ -329,3 +329,40 @@ func (r *Repository) DeleteBranch(name string, force bool) error {
 	return nil
 }
 
+// CurrentBranch returns the name of the currently checked out branch.
+//
+// Returns an empty string if HEAD is detached (not pointing to a branch).
+//
+// Examples:
+//
+//	branch, err := repo.CurrentBranch()
+//	if err != nil {
+//	    return err
+//	}
+//	if branch == "" {
+//	    fmt.Println("HEAD is detached")
+//	} else {
+//	    fmt.Printf("Current branch: %s\n", branch)
+//	}
+func (r *Repository) CurrentBranch() (string, error) {
+	// Get HEAD reference
+	head, err := r.repo.Head()
+	if err != nil {
+		// Check if this is a detached HEAD error
+		if err == plumbing.ErrReferenceNotFound {
+			// No HEAD reference found (empty repo)
+			return "", nil
+		}
+		return "", wrapError(err, "failed to get HEAD")
+	}
+
+	// Check if HEAD is pointing to a branch
+	if !head.Name().IsBranch() {
+		// HEAD is detached (pointing to a commit directly)
+		return "", nil
+	}
+
+	// Return the short branch name (e.g., "main" instead of "refs/heads/main")
+	return head.Name().Short(), nil
+}
+

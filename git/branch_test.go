@@ -522,3 +522,68 @@ func TestDeleteBranch_EmptyName(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "required")
 }
+
+func TestCurrentBranch_OnDefaultBranch(t *testing.T) {
+	repo, _ := createTestRepoWithCommit(t)
+
+	// Get current branch (should be master or main)
+	branch, err := repo.CurrentBranch()
+	require.NoError(t, err)
+
+	// Should return a branch name (not empty)
+	assert.NotEmpty(t, branch, "should return default branch name")
+
+	// Verify it matches HEAD
+	head, err := repo.Underlying().Head()
+	require.NoError(t, err)
+	assert.Equal(t, head.Name().Short(), branch)
+}
+
+func TestCurrentBranch_AfterCheckout(t *testing.T) {
+	repo, _ := createTestRepoWithCommit(t)
+
+	// Create and checkout a new branch
+	err := repo.CreateBranch("feature", "HEAD")
+	require.NoError(t, err)
+
+	err = repo.CheckoutBranch("feature")
+	require.NoError(t, err)
+
+	// Get current branch
+	branch, err := repo.CurrentBranch()
+	require.NoError(t, err)
+	assert.Equal(t, "feature", branch)
+}
+
+func TestCurrentBranch_DetachedHEAD(t *testing.T) {
+	repo, hash := createTestRepoWithCommit(t)
+
+	// Checkout a specific commit (detached HEAD)
+	wt, err := repo.Underlying().Worktree()
+	require.NoError(t, err)
+
+	err = wt.Checkout(&gogit.CheckoutOptions{
+		Hash: hash,
+	})
+	require.NoError(t, err)
+
+	// Get current branch (should be empty for detached HEAD)
+	branch, err := repo.CurrentBranch()
+	require.NoError(t, err)
+	assert.Empty(t, branch, "should return empty string for detached HEAD")
+}
+
+func TestCurrentBranch_EmptyRepository(t *testing.T) {
+	fs := memfs.New()
+
+	// Initialize repository without any commits
+	repo, err := Init("/test-repo", WithFilesystem(fs))
+	require.NoError(t, err)
+
+	// Get current branch from empty repo
+	branch, err := repo.CurrentBranch()
+	require.NoError(t, err)
+
+	// Empty repository has no HEAD, should return empty string
+	assert.Empty(t, branch, "should return empty string for empty repository")
+}
