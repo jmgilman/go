@@ -33,7 +33,7 @@ import (
 func Init(path string, opts ...RepositoryOption) (*Repository, error) {
 	// Apply options with defaults
 	options := &repositoryOptions{
-		fs:   osfs.New(path),
+		fs:   osfs.New("/"),
 		bare: false,
 	}
 	for _, opt := range opts {
@@ -110,7 +110,7 @@ func Init(path string, opts ...RepositoryOption) (*Repository, error) {
 func Open(path string, opts ...RepositoryOption) (*Repository, error) {
 	// Apply options with defaults
 	options := &repositoryOptions{
-		fs: osfs.New(path),
+		fs: osfs.New("/"),
 	}
 	for _, opt := range opts {
 		opt(options)
