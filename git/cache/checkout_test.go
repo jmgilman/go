@@ -307,8 +307,12 @@ func TestGetCheckout_WithUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new file: %v", err)
 	}
-	f.Write([]byte("new content\n"))
-	f.Close()
+	if _, err := f.Write([]byte("new content\n")); err != nil {
+		t.Fatalf("failed to write new file: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("failed to close new file: %v", err)
+	}
 
 	// Open source repo and commit the new file
 	repo, err := git.Open(sourceRepo, git.WithFilesystem(fs))
@@ -319,7 +323,9 @@ func TestGetCheckout_WithUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get worktree: %v", err)
 	}
-	wt.Add("new.txt")
+	if _, err := wt.Add("new.txt"); err != nil {
+		t.Fatalf("failed to add new file: %v", err)
+	}
 	_, err = wt.Commit("add new file", &gogit.CommitOptions{
 		Author: &object.Signature{
 			Name:  "Test User",

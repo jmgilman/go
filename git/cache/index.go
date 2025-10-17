@@ -78,7 +78,7 @@ func (idx *cacheIndex) save(fs billy.Filesystem, path string) error {
 	}
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		_ = fs.Remove(tmpPath)
 		return fmt.Errorf("failed to write temporary index file: %w", err)
 	}

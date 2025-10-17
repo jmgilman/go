@@ -32,10 +32,12 @@ func createTestRepo(t *testing.T, fs billy.Filesystem, repoPath string) string {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 	if _, err := f.Write([]byte("test content\n")); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatalf("failed to write test file: %v", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("failed to close test file: %v", err)
+	}
 
 	// Add and commit the file
 	wt, err := repo.Underlying().Worktree()
