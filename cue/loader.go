@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -236,11 +237,38 @@ func (l *Loader) LoadModule(ctx context.Context, modulePath string) (cue.Value, 
 		)
 	}
 
+	// Try to read module import path from cue.mod/module.cue
+	// This is needed for proper import resolution when using overlays
+	moduleImportPath := ""
+	moduleFilePath := filepath.Join(modulePath, "cue.mod", "module.cue")
+
+	// Check if module file exists
+	if exists, _ := fileExists(l.fs, moduleFilePath); exists {
+		// Read module import path
+		if modPath, err := readModuleImportPath(l.fs, modulePath); err == nil {
+			moduleImportPath = modPath
+		}
+
+		// Also add the module file to the overlay
+		// This is important for CUE to be able to reference it
+		if data, err := l.fs.ReadFile(moduleFilePath); err == nil {
+			absModulePath := "/" + moduleFilePath
+			overlay[absModulePath] = load.FromBytes(data)
+		}
+	}
+
 	// Load using load.Instances
+	// Normalize the directory path
+	dir := "/" + modulePath
+	if modulePath == "." {
+		dir = "/"
+	}
+
 	config := &load.Config{
-		Dir:        "/" + modulePath,
-		ModuleRoot: "/" + modulePath,
+		Dir:        dir,
+		ModuleRoot: dir,
 		Overlay:    overlay,
+		Module:     moduleImportPath, // Explicitly set for import resolution with overlays
 	}
 
 	insts := load.Instances([]string{"."}, config)
@@ -385,4 +413,51 @@ func fileExists(filesystem core.ReadFS, path string) (bool, error) {
 		return false, fmt.Errorf("failed to check if file exists: %w", err)
 	}
 	return exists, nil
+}
+
+// readModuleImportPath reads the module import path from cue.mod/module.cue.
+// This is needed for proper import resolution when loading modules with overlays.
+// Returns empty string and error if the module file doesn't exist or can't be parsed.
+func readModuleImportPath(filesystem core.ReadFS, modulePath string) (string, error) {
+	// Construct path to cue.mod/module.cue
+	moduleFilePath := filepath.Join(modulePath, "cue.mod", "module.cue")
+
+	// Check if file exists
+	exists, err := fileExists(filesystem, moduleFilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to check module file: %w", err)
+	}
+	if !exists {
+		return "", fmt.Errorf("cue.mod/module.cue not found")
+	}
+
+	// Read the file
+	data, err := filesystem.ReadFile(moduleFilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read module file: %w", err)
+	}
+
+	// Parse the module field
+	// Simple parsing: look for 'module: "path"' or "module: 'path'"
+	content := string(data)
+	lines := strings.Split(content, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "module:") {
+			// Extract the quoted string
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			value := strings.TrimSpace(parts[1])
+			// Remove quotes (both " and ')
+			value = strings.Trim(value, `"'`)
+			if value != "" {
+				return value, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("module field not found in cue.mod/module.cue")
 }

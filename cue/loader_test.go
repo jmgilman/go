@@ -90,6 +90,96 @@ func TestLoadModule(t *testing.T) {
 		}
 	})
 
+	t.Run("loads module with cross-package imports", func(t *testing.T) {
+		mfs := billy.NewMemory()
+
+		// Create cue.mod/module.cue
+		if err := mfs.MkdirAll("cue.mod", 0755); err != nil {
+			t.Fatalf("failed to create cue.mod directory: %v", err)
+		}
+		if err := mfs.WriteFile("cue.mod/module.cue", []byte(`
+module: "example.com/mymodule"
+language: {
+	version: "v0.14.0"
+}
+`), 0644); err != nil {
+			t.Fatalf("failed to create cue.mod/module.cue: %v", err)
+		}
+
+		// Create a package with common types
+		if err := mfs.MkdirAll("common", 0755); err != nil {
+			t.Fatalf("failed to create common directory: %v", err)
+		}
+		if err := mfs.WriteFile("common/types.cue", []byte(`
+package common
+
+#Person: {
+	name: string
+	age: int
+}
+`), 0644); err != nil {
+			t.Fatalf("failed to create common/types.cue: %v", err)
+		}
+
+		// Create main package that imports common
+		if err := mfs.WriteFile("main.cue", []byte(`
+package main
+
+import "example.com/mymodule/common"
+
+person: common.#Person & {
+	name: "Alice"
+	age: 30
+}
+`), 0644); err != nil {
+			t.Fatalf("failed to create main.cue: %v", err)
+		}
+
+		ctx := context.Background()
+		loader := NewLoader(mfs)
+
+		// Load the module - this should now work with cross-package imports
+		result, err := loader.LoadModule(ctx, ".")
+		if err != nil {
+			t.Fatalf("LoadModule failed with cross-package imports: %v", err)
+		}
+
+		// Verify the loaded value includes the imported type
+		personField := result.LookupPath(cue.ParsePath("person"))
+		if personField.Err() != nil {
+			t.Fatalf("failed to lookup person field: %v", personField.Err())
+		}
+
+		// Verify the person has the correct structure
+		nameField := personField.LookupPath(cue.ParsePath("name"))
+		if nameField.Err() != nil {
+			t.Fatalf("failed to lookup name field: %v", nameField.Err())
+		}
+
+		name, err := nameField.String()
+		if err != nil {
+			t.Fatalf("failed to extract name: %v", err)
+		}
+
+		if name != "Alice" {
+			t.Errorf("expected name='Alice', got name=%q", name)
+		}
+
+		ageField := personField.LookupPath(cue.ParsePath("age"))
+		if ageField.Err() != nil {
+			t.Fatalf("failed to lookup age field: %v", ageField.Err())
+		}
+
+		age, err := ageField.Int64()
+		if err != nil {
+			t.Fatalf("failed to extract age: %v", err)
+		}
+
+		if age != 30 {
+			t.Errorf("expected age=30, got age=%d", age)
+		}
+	})
+
 	t.Run("returns error when module directory does not exist", func(t *testing.T) {
 		mfs := billy.NewMemory()
 		ctx := context.Background()
