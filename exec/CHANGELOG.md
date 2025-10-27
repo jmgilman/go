@@ -13,4 +13,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Intial release
 
-[0.1.0]: https://github.com/jmgilman/go/releases/tag/cue/v0.1.0
+[0.1.0]: https://github.com/jmgilman/go/releases/tag/exec/v0.1.0
