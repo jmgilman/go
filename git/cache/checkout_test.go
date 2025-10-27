@@ -614,7 +614,7 @@ func TestGetCheckout_UsesAlternates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open alternates file: %v", err)
 	}
-	defer alternatesFile.Close()
+	defer func() { _ = alternatesFile.Close() }()
 
 	var alternatesContent [256]byte
 	n, err := alternatesFile.Read(alternatesContent[:])

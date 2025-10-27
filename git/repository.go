@@ -157,7 +157,7 @@ func Open(path string, opts ...RepositoryOption) (*Repository, error) {
 		if err != nil {
 			return nil, wrapError(err, "failed to read .git file")
 		}
-		defer gitFile.Close()
+		defer func() { _ = gitFile.Close() }()
 
 		content, err := io.ReadAll(gitFile)
 		if err != nil {

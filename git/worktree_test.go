@@ -207,7 +207,7 @@ func TestCreateWorktree_WithHash(t *testing.T) {
 	requireGit(t)
 
 	repo, hash1, _, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree1")
 
@@ -217,7 +217,7 @@ func TestCreateWorktree_WithHash(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, wt)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Verify the worktree path
 	assert.Equal(t, worktreePath, wt.Path())
@@ -234,7 +234,7 @@ func TestCreateWorktree_WithBranch(t *testing.T) {
 	requireGit(t)
 
 	repo, _, _, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a branch
 	branchRef := plumbing.NewBranchReferenceName("test-branch")
@@ -252,7 +252,7 @@ func TestCreateWorktree_WithBranch(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, wt)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Verify the worktree was created
 	assert.Equal(t, worktreePath, wt.Path())
@@ -291,7 +291,7 @@ func TestListWorktrees(t *testing.T) {
 	requireGit(t)
 
 	repo, _, _, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a couple of worktrees
 	wt1Path := filepath.Join(tmpDir, "worktree1")
@@ -299,7 +299,7 @@ func TestListWorktrees(t *testing.T) {
 		Branch: plumbing.NewBranchReferenceName("main"),
 	})
 	require.NoError(t, err)
-	defer wt1.Remove()
+	defer func() { _ = wt1.Remove() }()
 
 	wt2Path := filepath.Join(tmpDir, "worktree2")
 	wt2, err := repo.CreateWorktree(wt2Path, WorktreeOptions{
@@ -307,7 +307,7 @@ func TestListWorktrees(t *testing.T) {
 		CreateBranch: "feature",
 	})
 	require.NoError(t, err)
-	defer wt2.Remove()
+	defer func() { _ = wt2.Remove() }()
 
 	// List worktrees
 	worktrees, err := repo.ListWorktrees()
@@ -337,7 +337,7 @@ func TestWorktree_Checkout(t *testing.T) {
 	requireGit(t)
 
 	repo, hash1, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-checkout")
 
@@ -346,7 +346,7 @@ func TestWorktree_Checkout(t *testing.T) {
 		Hash: hash2,
 	})
 	require.NoError(t, err)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Verify both files exist initially
 	_, err = os.Stat(filepath.Join(worktreePath, "file1.txt"))
@@ -369,7 +369,7 @@ func TestWorktree_Checkout_Branch(t *testing.T) {
 	requireGit(t)
 
 	repo, _, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a branch
 	branchRef := plumbing.NewBranchReferenceName("test-branch")
@@ -383,7 +383,7 @@ func TestWorktree_Checkout_Branch(t *testing.T) {
 		Hash: hash2,
 	})
 	require.NoError(t, err)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Checkout the branch
 	err = wt.Checkout("test-branch")
@@ -397,7 +397,7 @@ func TestWorktree_Checkout_InvalidRef(t *testing.T) {
 	requireGit(t)
 
 	repo, _, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-invalid")
 
@@ -406,7 +406,7 @@ func TestWorktree_Checkout_InvalidRef(t *testing.T) {
 		Hash: hash2,
 	})
 	require.NoError(t, err)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Try to checkout invalid reference
 	err = wt.Checkout("nonexistent")
@@ -417,7 +417,7 @@ func TestWorktree_Remove_Clean(t *testing.T) {
 	requireGit(t)
 
 	repo, _, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-remove")
 
@@ -440,7 +440,7 @@ func TestWorktree_Remove_DirtyWorktree(t *testing.T) {
 	requireGit(t)
 
 	repo, _, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-dirty")
 
@@ -449,7 +449,7 @@ func TestWorktree_Remove_DirtyWorktree(t *testing.T) {
 		Hash: hash2,
 	})
 	require.NoError(t, err)
-	defer wt.Remove() // cleanup in case test fails
+	defer func() { _ = wt.Remove() }() // cleanup in case test fails
 
 	// Make worktree dirty by creating a new file
 	err = os.WriteFile(filepath.Join(worktreePath, "newfile.txt"), []byte("new content"), 0644)
@@ -465,7 +465,7 @@ func TestWorktree_Path(t *testing.T) {
 	requireGit(t)
 
 	repo, _, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-path")
 
@@ -474,7 +474,7 @@ func TestWorktree_Path(t *testing.T) {
 		Hash: hash2,
 	})
 	require.NoError(t, err)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Verify path
 	assert.Equal(t, worktreePath, wt.Path())
@@ -484,7 +484,7 @@ func TestWorktree_Underlying(t *testing.T) {
 	requireGit(t)
 
 	repo, _, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-underlying")
 
@@ -493,7 +493,7 @@ func TestWorktree_Underlying(t *testing.T) {
 		Hash: hash2,
 	})
 	require.NoError(t, err)
-	defer wt.Remove()
+	defer func() { _ = wt.Remove() }()
 
 	// Get underlying worktree
 	gogitWt := wt.Underlying()
@@ -512,7 +512,7 @@ func TestWorktree_Integration(t *testing.T) {
 	requireGit(t)
 
 	repo, hash1, hash2, tmpDir := createRealTestRepoWithCommits(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	worktreePath := filepath.Join(tmpDir, "worktree-integration")
 
