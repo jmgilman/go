@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmgilman/go/fs/core"
 	"github.com/jmgilman/go/fs/minio/internal/errs"
 	"github.com/jmgilman/go/fs/minio/internal/pathutil"
 	"github.com/jmgilman/go/fs/minio/internal/types"
@@ -801,4 +802,17 @@ func TestChroot(t *testing.T) {
 		// Chroot(".") should keep the same prefix
 		assert.Equal(t, "myapp", chrootMinioFS.prefix)
 	})
+}
+
+func TestType(t *testing.T) {
+	mfs := &MinioFS{
+		client:             &minio.Client{},
+		bucket:             "test-bucket",
+		prefix:             "",
+		multipartThreshold: 5 * 1024 * 1024,
+	}
+
+	fsType := mfs.Type()
+	assert.Equal(t, core.FSTypeRemote, fsType, "MinioFS should return FSTypeRemote")
+	assert.Equal(t, "remote", fsType.String(), "FSTypeRemote should stringify to 'remote'")
 }

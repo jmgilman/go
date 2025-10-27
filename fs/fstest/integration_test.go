@@ -392,6 +392,10 @@ func (f *osFS) Chroot(dir string) (core.FS, error) {
 	return &osFS{root: newRoot}, nil
 }
 
+func (f *osFS) Type() core.FSType {
+	return core.FSTypeLocal
+}
+
 // MetadataFS methods.
 func (f *osFS) Lstat(name string) (fs.FileInfo, error) {
 	//nolint:wrapcheck // Test helper - must pass through os errors unchanged for error detection

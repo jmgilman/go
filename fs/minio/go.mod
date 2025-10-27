@@ -3,7 +3,7 @@ module github.com/jmgilman/go/fs/minio
 go 1.24.2
 
 require (
-	github.com/jmgilman/go/fs/core v0.1.0
+	github.com/jmgilman/go/fs/core v0.2.0
 	github.com/jmgilman/go/fs/fstest v0.1.0
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/stretchr/testify v1.11.1
