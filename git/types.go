@@ -13,9 +13,10 @@ import (
 // It stores both the underlying go-git repository and a billy filesystem
 // for all I/O operations, providing escape hatches for advanced use cases.
 type Repository struct {
-	path string
-	repo *gogit.Repository
-	fs   billy.Filesystem
+	path        string
+	repo        *gogit.Repository
+	fs          billy.Filesystem
+	worktreeOps WorktreeOperations
 }
 
 // Worktree wraps a go-git worktree with path tracking and a back-reference
@@ -96,8 +97,11 @@ type PushOptions struct {
 
 // WorktreeOptions configures worktree creation.
 type WorktreeOptions struct {
-	Hash   plumbing.Hash
-	Branch plumbing.ReferenceName
+	Hash         plumbing.Hash
+	Branch       plumbing.ReferenceName
+	CreateBranch string // Create a new branch with this name when adding worktree
+	Force        bool   // Force creation even if worktree path already exists
+	Detach       bool   // Detach HEAD at named commit
 }
 
 // CommitOptions configures commit creation.
@@ -122,6 +126,7 @@ type RepositoryOption func(*repositoryOptions)
 type repositoryOptions struct {
 	fs            billy.Filesystem
 	remoteOps     RemoteOperations
+	worktreeOps   WorktreeOperations
 	bare          bool
 	auth          Auth
 	depth         int
@@ -214,5 +219,22 @@ func WithSingleBranch() RepositoryOption {
 func WithReferenceName(ref plumbing.ReferenceName) RepositoryOption {
 	return func(opts *repositoryOptions) {
 		opts.referenceName = ref
+	}
+}
+
+// WithWorktreeOperations sets the WorktreeOperations implementation to use for
+// worktree operations (add, list, remove, lock, unlock, prune). If not provided,
+// defaults to the git CLI implementation via the exec module.
+//
+// This option is primarily useful for testing, allowing consumers to mock
+// worktree operations without actual git CLI calls.
+//
+// Example:
+//
+//	repo, err := git.Open("/path/to/repo",
+//	    git.WithWorktreeOperations(mockOps))
+func WithWorktreeOperations(ops WorktreeOperations) RepositoryOption {
+	return func(opts *repositoryOptions) {
+		opts.worktreeOps = ops
 	}
 }
