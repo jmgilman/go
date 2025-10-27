@@ -3,6 +3,7 @@ go 1.24.2
 use (
 	./cue
 	./errors
+	./exec
 	./fs/billy
 	./fs/core
 	./fs/fstest
