@@ -8,6 +8,8 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
+	"github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/jmgilman/go/git"
 )
 
@@ -172,67 +174,58 @@ func (c *RepositoryCache) getOrCreateCheckout(
 	return checkoutPath, nil
 }
 
-// createCheckout creates a new checkout from a bare repository.
+// createCheckout creates a new checkout from a bare repository using git alternates.
 //
-// This creates a new working tree by cloning from the local bare repository.
-// The checkout tracks the bare repository as its remote, allowing fast updates.
+// This creates a new working tree by cloning from the local bare repository with
+// the Shared option, which creates .git/objects/info/alternates to reference the
+// bare repository's object database. This avoids duplicating objects.
 func (c *RepositoryCache) createCheckout(ctx context.Context, checkoutPath string, bareRepo *git.Repository, ref string) (*git.Repository, error) {
-	// Get the URL from the bare repo's remote
-	remotes, err := bareRepo.ListRemotes()
+	// Get bare repo path from our tracking map
+	normalized := normalizeURL("")
+	for url, repo := range c.bare {
+		if repo == bareRepo {
+			normalized = url
+			break
+		}
+	}
+
+	barePath, ok := c.barePaths[normalized]
+	if !ok {
+		return nil, fmt.Errorf("bare repository path not found in cache")
+	}
+
+	// Create checkout directory
+	if err := c.fs.MkdirAll(checkoutPath, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create checkout directory: %w", err)
+	}
+
+	// Create a filesystem scoped to the checkout path
+	scopedFs, err := c.fs.Chroot(checkoutPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list remotes: %w", err)
+		return nil, fmt.Errorf("failed to scope filesystem to checkout path: %w", err)
 	}
 
-	if len(remotes) == 0 || len(remotes[0].URLs) == 0 {
-		return nil, fmt.Errorf("bare repository has no remotes configured")
-	}
-
-	originalURL := remotes[0].URLs[0]
-
-	// Initialize a new repository at the checkout path
-	repo, err := git.Init(checkoutPath, git.WithFilesystem(c.fs))
+	// Create storage in .git subdirectory
+	dotGitFs, err := scopedFs.Chroot(".git")
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize checkout repository: %w", err)
+		return nil, fmt.Errorf("failed to create .git filesystem: %w", err)
 	}
 
-	// Add the original remote URL (the checkout will use the bare cache for actual fetches)
-	if err := repo.AddRemote(git.RemoteOptions{
-		Name: "origin",
-		URL:  originalURL,
-	}); err != nil {
-		return nil, fmt.Errorf("failed to add remote: %w", err)
-	}
+	storage := filesystem.NewStorage(dotGitFs, cache.NewObjectLRUDefault())
 
-	// Get underlying repositories for direct manipulation
-	checkoutUnderlying := repo.Underlying()
-	bareUnderlying := bareRepo.Underlying()
-
-	// Copy all objects from bare repo to checkout
-	// This is necessary because the checkout needs access to git objects
-	objectIter, err := bareUnderlying.Storer.IterEncodedObjects(plumbing.AnyObject)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get objects: %w", err)
-	}
-
-	err = objectIter.ForEach(func(obj plumbing.EncodedObject) error {
-		_, err := checkoutUnderlying.Storer.SetEncodedObject(obj)
-		return err
+	// Clone from local bare repo with Shared option (creates alternates)
+	_, err = gogit.CloneContext(ctx, storage, scopedFs, &gogit.CloneOptions{
+		URL:    barePath,
+		Shared: true, // Creates .git/objects/info/alternates
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to copy objects: %w", err)
+		return nil, fmt.Errorf("failed to clone with alternates: %w", err)
 	}
 
-	// Copy all references from bare to checkout
-	refIter, err := bareUnderlying.References()
+	// Open the newly created repository using our wrapper
+	repo, err := git.Open(checkoutPath, git.WithFilesystem(c.fs))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get references: %w", err)
-	}
-
-	err = refIter.ForEach(func(ref *plumbing.Reference) error {
-		return checkoutUnderlying.Storer.SetReference(ref)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to copy references: %w", err)
+		return nil, fmt.Errorf("failed to open cloned checkout: %w", err)
 	}
 
 	// Checkout the specified ref
@@ -240,6 +233,8 @@ func (c *RepositoryCache) createCheckout(ctx context.Context, checkoutPath strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to get worktree: %w", err)
 	}
+
+	bareUnderlying := bareRepo.Underlying()
 
 	// Try checking out as a branch first
 	branchRef := plumbing.NewBranchReferenceName(ref)
@@ -266,61 +261,57 @@ func (c *RepositoryCache) createCheckout(ctx context.Context, checkoutPath strin
 
 // refreshCheckout updates a checkout from its bare repository.
 //
-// This fetches the latest changes from the bare repository and resets the
-// working tree to match. This preserves symlinks and updates files in place.
+// With git alternates, objects are already shared between the bare repo and checkouts,
+// so we only need to resolve the ref in the bare repo and reset the checkout's working tree.
+// No object or ref copying is needed.
 func (c *RepositoryCache) refreshCheckout(ctx context.Context, checkout, bareRepo *git.Repository, ref string) error {
-	// Copy updated references and objects from bare repo to checkout
-	checkoutUnderlying := checkout.Underlying()
+	// Resolve ref in bare repo (source of truth)
 	bareUnderlying := bareRepo.Underlying()
-
-	// Copy all objects from bare repo to checkout
-	// This ensures new commits/trees/blobs are available
-	objectIter, err := bareUnderlying.Storer.IterEncodedObjects(plumbing.AnyObject)
+	hash, err := bareUnderlying.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
-		return fmt.Errorf("failed to get objects: %w", err)
+		return fmt.Errorf("failed to resolve ref %s in bare repo: %w", ref, err)
 	}
 
-	err = objectIter.ForEach(func(obj plumbing.EncodedObject) error {
-		_, err := checkoutUnderlying.Storer.SetEncodedObject(obj)
-		return err
-	})
+	// Get checkout path
+	checkoutPath := checkout.Filesystem().Root()
+
+	// Open the checkout with filesystem that allows alternates to work
+	// We need to use the root filesystem (c.fs) as the AlternatesFS
+	checkoutFs, err := c.fs.Chroot(checkoutPath)
 	if err != nil {
-		return fmt.Errorf("failed to copy objects: %w", err)
+		return fmt.Errorf("failed to chroot to checkout: %w", err)
 	}
 
-	// Get all references from bare repo
-	refIter, err := bareUnderlying.References()
+	dotGitFs, err := checkoutFs.Chroot(".git")
 	if err != nil {
-		return fmt.Errorf("failed to get references: %w", err)
+		return fmt.Errorf("failed to chroot to .git: %w", err)
 	}
 
-	// Copy references to checkout
-	err = refIter.ForEach(func(ref *plumbing.Reference) error {
-		return checkoutUnderlying.Storer.SetReference(ref)
-	})
+	// Create storage with AlternatesFS set to root filesystem
+	// This allows go-git to access alternates outside the repository
+	storage := filesystem.NewStorageWithOptions(dotGitFs, cache.NewObjectLRUDefault(),
+		filesystem.Options{
+			AlternatesFS: c.fs, // Use root filesystem to access alternates
+		})
+
+	// Open repository with the configured storage
+	freshRepo, err := gogit.Open(storage, checkoutFs)
 	if err != nil {
-		return fmt.Errorf("failed to copy references: %w", err)
+		return fmt.Errorf("failed to open checkout with alternates support: %w", err)
 	}
 
-	// Get worktree and reset to the specified ref
-	worktree, err := checkoutUnderlying.Worktree()
+	// Reset checkout working tree
+	worktree, err := freshRepo.Worktree()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
-	// Resolve the ref to a hash
-	hash, err := bareUnderlying.ResolveRevision(plumbing.Revision(ref))
-	if err != nil {
-		return fmt.Errorf("failed to resolve ref %s: %w", ref, err)
-	}
-
-	// Hard reset to the ref
 	err = worktree.Reset(&gogit.ResetOptions{
 		Commit: *hash,
 		Mode:   gogit.HardReset,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to reset to %s: %w", ref, err)
+		return fmt.Errorf("failed to reset to %s (%s): %w", ref, hash, err)
 	}
 
 	return nil
