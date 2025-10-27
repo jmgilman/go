@@ -6,6 +6,34 @@ import (
 	"time"
 )
 
+// FSType represents the underlying type of filesystem implementation.
+type FSType int
+
+const (
+	// FSTypeUnknown indicates the filesystem type is unknown or unspecified.
+	FSTypeUnknown FSType = iota
+	// FSTypeLocal indicates a local filesystem (e.g., disk-backed).
+	FSTypeLocal
+	// FSTypeMemory indicates an in-memory filesystem.
+	FSTypeMemory
+	// FSTypeRemote indicates a remote filesystem (e.g., S3, cloud storage).
+	FSTypeRemote
+)
+
+// String returns a string representation of the FSType.
+func (t FSType) String() string {
+	switch t {
+	case FSTypeLocal:
+		return "local"
+	case FSTypeMemory:
+		return "memory"
+	case FSTypeRemote:
+		return "remote"
+	default:
+		return "unknown"
+	}
+}
+
 // FS is the primary filesystem interface combining all core operations.
 // FS explicitly embeds fs.FS for stdlib compatibility.
 //
@@ -19,6 +47,11 @@ type FS interface {
 	ManageFS
 	WalkFS
 	ChrootFS
+
+	// Type returns the underlying filesystem type.
+	// This allows callers to introspect whether the filesystem is
+	// backed by a real disk, in-memory storage, or remote storage.
+	Type() FSType
 }
 
 // ReadFS defines read-only filesystem operations.
