@@ -15,16 +15,17 @@
 //  1. Thin wrappers over go-git (not reimplementing Git)
 //  2. Billy filesystem for all I/O operations
 //  3. Escape hatches via Underlying() methods for advanced use cases
-//  4. RemoteOperations interface enables testing by mocking network operations
+//  4. RemoteOperations and WorktreeOperations interfaces enable testing by mocking operations
 //  5. Organized by operation type (repository, worktree, branch, tag, commit, remote)
+//  6. Worktree operations use git CLI for true linked worktree support
 //
 // # Core Types
 //
 // Repository wraps go-git with platform conventions and provides methods for all Git operations.
 //
-// Worktree represents a Git worktree with path tracking and operations. Note: go-git v5 does
-// not support linked worktrees (git worktree add). The CreateWorktree method returns the main
-// worktree checked out to the specified reference.
+// Worktree represents a Git worktree with path tracking and operations. This library provides
+// full support for linked worktrees via git CLI commands, allowing multiple branches to be
+// checked out simultaneously in separate working directories.
 //
 // Commit, Branch, Tag, and Remote are value types for representing Git objects.
 //
@@ -36,6 +37,18 @@
 //
 // The filesystem is scoped to the repository path, so all file operations are relative to
 // the repository root.
+//
+// # Worktree Support via Git CLI
+//
+// Worktree operations (CreateWorktree, ListWorktrees, Remove, Lock, Unlock, PruneWorktrees)
+// use git CLI commands to provide true linked worktree support. This requires:
+//
+//	1. Git must be installed and available in the system PATH
+//	2. Operations must use the OS filesystem (osfs) - memory filesystems (memfs) are not supported
+//	3. The WorktreeOperations interface can be mocked for testing without git CLI dependency
+//
+// When a memory filesystem is detected, worktree operations will return an error explaining
+// that worktrees require the OS filesystem.
 //
 // # Factory Functions
 //
@@ -141,7 +154,7 @@
 //	        panic(err)
 //	    }
 //
-//	    // Create worktree at specific commit
+//	    // Create linked worktree at specific commit
 //	    wt, err := repo.CreateWorktree("/tmp/worktree", git.WorktreeOptions{
 //	        Hash: plumbing.NewHash("abc123..."),
 //	    })
@@ -150,7 +163,19 @@
 //	    }
 //	    defer wt.Remove()
 //
-//	    // Work with worktree...
+//	    // Create worktree with new branch
+//	    wt2, err := repo.CreateWorktree("/tmp/feature", git.WorktreeOptions{
+//	        Branch: plumbing.NewBranchReferenceName("main"),
+//	        CreateBranch: "new-feature",
+//	    })
+//	    if err != nil {
+//	        panic(err)
+//	    }
+//
+//	    // Lock worktree to prevent pruning
+//	    err = wt2.Lock("Working on feature")
+//
+//	    // Work with worktrees...
 //	    println("Worktree created at:", wt.Path())
 //	}
 //
@@ -288,11 +313,13 @@
 //	// Create test files
 //	err := testutil.CreateTestFile(fs, "test.txt", "content")
 //
-// For mocking network operations in tests:
+// For mocking network and worktree operations in tests:
 //
-//	mockOps := &mockRemoteOps{...}
+//	mockRemoteOps := &mockRemoteOps{...}
+//	mockWorktreeOps := &mockWorktreeOps{...}
 //	repo, err := git.Clone(ctx, "https://github.com/org/repo",
-//	    git.WithRemoteOperations(mockOps))
+//	    git.WithRemoteOperations(mockRemoteOps),
+//	    git.WithWorktreeOperations(mockWorktreeOps))
 //
 // # References
 //

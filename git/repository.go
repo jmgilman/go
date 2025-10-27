@@ -2,6 +2,9 @@ package git
 
 import (
 	"context"
+	"io"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -68,11 +71,20 @@ func Init(path string, opts ...RepositoryOption) (*Repository, error) {
 			return nil, wrapError(err, "failed to initialize repository")
 		}
 
-		return &Repository{
+		result := &Repository{
 			path: path,
 			repo: repo,
 			fs:   scopedFs,
-		}, nil
+		}
+
+		// Initialize worktreeOps if not provided
+		if options.worktreeOps == nil {
+			result.worktreeOps = newDefaultWorktreeOps(nil, path, scopedFs)
+		} else {
+			result.worktreeOps = options.worktreeOps
+		}
+
+		return result, nil
 	}
 
 	// For bare repositories, storage is in the root
@@ -84,11 +96,20 @@ func Init(path string, opts ...RepositoryOption) (*Repository, error) {
 		return nil, wrapError(err, "failed to initialize bare repository")
 	}
 
-	return &Repository{
+	result := &Repository{
 		path: path,
 		repo: repo,
 		fs:   scopedFs,
-	}, nil
+	}
+
+	// Initialize worktreeOps if not provided
+	if options.worktreeOps == nil {
+		result.worktreeOps = newDefaultWorktreeOps(nil, path, scopedFs)
+	} else {
+		result.worktreeOps = options.worktreeOps
+	}
+
+	return result, nil
 }
 
 // Open opens an existing Git repository at the specified path.
@@ -123,20 +144,55 @@ func Open(path string, opts ...RepositoryOption) (*Repository, error) {
 		return nil, wrapError(err, "failed to scope filesystem to path")
 	}
 
-	// Check if this is a standard repository (has .git directory) or bare
+	// Check if .git is a file (linked worktree) or directory (main repo)
 	dotGitStat, dotGitErr := scopedFs.Stat(".git")
-	
+
 	var repo *gogit.Repository
-	
-	if dotGitErr == nil && dotGitStat.IsDir() {
+	var mainRepoPath string
+
+	if dotGitErr == nil && !dotGitStat.IsDir() {
+		// .git is a file - this is a linked worktree
+		// Read the gitdir path from .git file
+		gitFile, err := scopedFs.Open(".git")
+		if err != nil {
+			return nil, wrapError(err, "failed to read .git file")
+		}
+		defer gitFile.Close()
+
+		content, err := io.ReadAll(gitFile)
+		if err != nil {
+			return nil, wrapError(err, "failed to read .git file content")
+		}
+
+		// Parse "gitdir: /path/to/main-repo/.git/worktrees/name"
+		gitdirLine := strings.TrimSpace(string(content))
+		gitdir := strings.TrimPrefix(gitdirLine, "gitdir: ")
+
+		// Determine main repo path for worktree operations
+		mainRepoPath = findMainRepoPath(gitdir)
+
+		// For linked worktrees, we need to use the main repository's .git directory for storage
+		// so we have access to all objects
+		mainGitPath := filepath.Join(mainRepoPath, ".git")
+		mainGitFs := osfs.New(mainGitPath)
+		storage := filesystem.NewStorage(mainGitFs, cache.NewObjectLRUDefault())
+
+		// Open with the worktree's filesystem but the main repo's storage
+		repo, err = gogit.Open(storage, scopedFs)
+		if err != nil {
+			return nil, wrapError(err, "failed to open linked worktree")
+		}
+	} else if dotGitErr == nil && dotGitStat.IsDir() {
 		// Standard repository with .git directory
+		mainRepoPath = path
+
 		dotGitFs, err := scopedFs.Chroot(".git")
 		if err != nil {
 			return nil, wrapError(err, "failed to scope filesystem to .git")
 		}
-		
+
 		storage := filesystem.NewStorage(dotGitFs, cache.NewObjectLRUDefault())
-		
+
 		// Open with worktree
 		repo, err = gogit.Open(storage, scopedFs)
 		if err != nil {
@@ -144,8 +200,10 @@ func Open(path string, opts ...RepositoryOption) (*Repository, error) {
 		}
 	} else {
 		// Bare repository (no .git directory, objects etc. are in root)
+		mainRepoPath = path
+
 		storage := filesystem.NewStorage(scopedFs, cache.NewObjectLRUDefault())
-		
+
 		// Open without worktree
 		repo, err = gogit.Open(storage, nil)
 		if err != nil {
@@ -153,11 +211,35 @@ func Open(path string, opts ...RepositoryOption) (*Repository, error) {
 		}
 	}
 
-	return &Repository{
+	result := &Repository{
 		path: path,
 		repo: repo,
 		fs:   scopedFs,
-	}, nil
+	}
+
+	// Initialize worktreeOps if not provided
+	if options.worktreeOps == nil {
+		result.worktreeOps = newDefaultWorktreeOps(nil, mainRepoPath, scopedFs)
+	} else {
+		result.worktreeOps = options.worktreeOps
+	}
+
+	return result, nil
+}
+
+// findMainRepoPath extracts the main repository path from a gitdir path.
+// For linked worktrees, gitdir points to something like:
+//   /path/to/repo/.git/worktrees/worktree-name
+// This function extracts /path/to/repo from that path.
+func findMainRepoPath(gitdir string) string {
+	// Find the "/.git/" part and extract everything before it
+	idx := strings.Index(gitdir, "/.git/")
+	if idx > 0 {
+		return gitdir[:idx]
+	}
+	// If we can't find the pattern, return the gitdir as-is
+	// (this shouldn't happen in practice)
+	return gitdir
 }
 
 // Underlying returns the underlying go-git Repository for advanced operations

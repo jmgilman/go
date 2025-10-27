@@ -97,11 +97,16 @@ func (d *defaultRemoteOps) Clone(ctx context.Context, fs billy.Filesystem, opts 
 		return nil, wrapError(err, "failed to clone repository")
 	}
 
-	return &Repository{
+	result := &Repository{
 		path: path,
 		repo: repo,
 		fs:   scopedFs,
-	}, nil
+	}
+
+	// Initialize worktreeOps with default implementation
+	result.worktreeOps = newDefaultWorktreeOps(nil, path, scopedFs)
+
+	return result, nil
 }
 
 // Fetch implements RemoteOperations.Fetch using go-git's Fetch.

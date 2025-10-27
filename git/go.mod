@@ -6,6 +6,7 @@ require (
 	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.16.3
 	github.com/jmgilman/go/errors v0.1.0
+	github.com/jmgilman/go/exec v0.1.0
 	github.com/stretchr/testify v1.11.1
 )
 
@@ -32,3 +33,5 @@ require (
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/jmgilman/go/exec => ../exec
