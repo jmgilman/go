@@ -254,6 +254,7 @@ func (m *mockFS) RemoveAll(_ string) error                          { return nil
 func (m *mockFS) Rename(_, _ string) error                          { return nil }
 func (m *mockFS) Walk(_ string, _ fs.WalkDirFunc) error             { return nil }
 func (m *mockFS) Chroot(_ string) (core.FS, error)                  { return nil, nil }
+func (m *mockFS) Type() core.FSType                                 { return core.FSTypeUnknown }
 
 // Example_implementingFS demonstrates that a type can implement the FS interface.
 func Example_implementingFS() {
