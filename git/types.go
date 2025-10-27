@@ -72,6 +72,7 @@ type CloneOptions struct {
 	Depth         int                    // 0 for full clone, >0 for shallow clone
 	SingleBranch  bool                   // Clone only a single branch
 	ReferenceName plumbing.ReferenceName // Branch or tag to clone
+	Shared        bool                   // Use git alternates to share objects with source repository
 }
 
 // FetchOptions configures fetch operations.
@@ -132,6 +133,7 @@ type repositoryOptions struct {
 	depth         int
 	singleBranch  bool
 	referenceName plumbing.ReferenceName
+	shared        bool
 }
 
 // WithFilesystem sets the billy filesystem to use for repository operations.
@@ -219,6 +221,24 @@ func WithSingleBranch() RepositoryOption {
 func WithReferenceName(ref plumbing.ReferenceName) RepositoryOption {
 	return func(opts *repositoryOptions) {
 		opts.referenceName = ref
+	}
+}
+
+// WithShared enables git alternates to share objects with the source repository.
+// This is useful when cloning from a local repository to avoid duplicating
+// the object database. The cloned repository will reference the source's objects
+// via .git/objects/info/alternates.
+//
+// This option only applies to Clone operations from local file paths.
+// When cloning from remote URLs, this option is ignored.
+//
+// Example:
+//
+//	// Clone from local bare repo with shared objects
+//	repo, err := git.Clone(ctx, "/path/to/bare.git", git.WithShared())
+func WithShared() RepositoryOption {
+	return func(opts *repositoryOptions) {
+		opts.shared = true
 	}
 }
 

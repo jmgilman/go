@@ -57,6 +57,7 @@ func NewRepositoryCache(basePath string, opts ...RepositoryCacheOption) (*Reposi
 		indexPath:   indexPath,
 		fs:          fs,
 		bare:        make(map[string]*git.Repository),
+		barePaths:   make(map[string]string),
 		checkouts:   make(map[string]*git.Repository),
 	}
 
@@ -90,6 +91,7 @@ func (c *RepositoryCache) Clear(url string) error {
 
 	// Remove from in-memory bare cache
 	delete(c.bare, normalized)
+	delete(c.barePaths, normalized)
 
 	// Find and remove all checkouts for this URL
 	allMetadata := c.index.filterByURL(url)
@@ -146,6 +148,7 @@ func (c *RepositoryCache) ClearAll() error {
 
 	// Clear in-memory caches
 	c.bare = make(map[string]*git.Repository)
+	c.barePaths = make(map[string]string)
 	c.checkouts = make(map[string]*git.Repository)
 
 	// Reset index

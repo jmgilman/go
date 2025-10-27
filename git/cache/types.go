@@ -27,6 +27,7 @@ type RepositoryCache struct {
 	fs        billy.Filesystem           // Filesystem abstraction for all I/O
 	index     *cacheIndex                // Metadata index
 	bare      map[string]*git.Repository // URL → bare repo (in-memory)
+	barePaths map[string]string          // normalized URL → bare repo filesystem path
 	checkouts map[string]*git.Repository // composite key → checkout repo (in-memory)
 
 	mu sync.RWMutex

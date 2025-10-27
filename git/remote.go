@@ -91,6 +91,11 @@ func (d *defaultRemoteOps) Clone(ctx context.Context, fs billy.Filesystem, opts 
 		cloneOpts.ReferenceName = opts.ReferenceName
 	}
 
+	// Set shared option for git alternates
+	if opts.Shared {
+		cloneOpts.Shared = true
+	}
+
 	// Perform the clone
 	repo, err := gogit.CloneContext(ctx, storage, scopedFs, cloneOpts)
 	if err != nil {

@@ -53,6 +53,7 @@ func (c *RepositoryCache) getOrCreateBareRepo(ctx context.Context, url string, o
 
 		// Cache in memory
 		c.bare[normalized] = repo
+		c.barePaths[normalized] = barePath
 		return repo, nil
 	}
 
@@ -64,6 +65,7 @@ func (c *RepositoryCache) getOrCreateBareRepo(ctx context.Context, url string, o
 
 	// Cache in memory
 	c.bare[normalized] = repo
+	c.barePaths[normalized] = barePath
 	return repo, nil
 }
 

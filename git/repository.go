@@ -312,6 +312,7 @@ func Clone(ctx context.Context, url string, opts ...RepositoryOption) (*Reposito
 		Depth:         options.depth,
 		SingleBranch:  options.singleBranch,
 		ReferenceName: options.referenceName,
+		Shared:        options.shared,
 	}
 
 	// Use the RemoteOperations interface to perform the clone

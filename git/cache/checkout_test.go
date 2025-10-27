@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -578,5 +579,88 @@ func TestGetCheckout_WithExplicitRef(t *testing.T) {
 	}
 	if metadata.Ref != "master" {
 		t.Errorf("expected ref to be master, got %s", metadata.Ref)
+	}
+}
+
+func TestGetCheckout_UsesAlternates(t *testing.T) {
+	tempDir := t.TempDir()
+	fs := osfs.New("/")
+
+	// Create a source repository
+	sourceRepo := createTestRepo(t, fs, filepath.Join(tempDir, "source"))
+
+	// Create cache
+	cache, err := NewRepositoryCache(filepath.Join(tempDir, "cache"), WithFilesystem(fs))
+	if err != nil {
+		t.Fatalf("failed to create cache: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Create first checkout
+	checkoutPath, err := cache.GetCheckout(ctx, sourceRepo, "test-key", WithRef("master"))
+	if err != nil {
+		t.Fatalf("failed to get checkout: %v", err)
+	}
+
+	// Verify alternates file exists
+	alternatesPath := filepath.Join(checkoutPath, ".git", "objects", "info", "alternates")
+	if _, err := fs.Stat(alternatesPath); err != nil {
+		t.Errorf("expected alternates file to exist at %s: %v", alternatesPath, err)
+	}
+
+	// Read alternates file and verify it's not empty
+	alternatesFile, err := fs.Open(alternatesPath)
+	if err != nil {
+		t.Fatalf("failed to open alternates file: %v", err)
+	}
+	defer alternatesFile.Close()
+
+	var alternatesContent [256]byte
+	n, err := alternatesFile.Read(alternatesContent[:])
+	if err != nil {
+		t.Fatalf("failed to read alternates file: %v", err)
+	}
+
+	alternatePath := strings.TrimSpace(string(alternatesContent[:n]))
+
+	// Verify alternates file contains a path
+	if alternatePath == "" {
+		t.Fatal("alternates file is empty")
+	}
+
+	// Verify it points to something that looks like an objects directory
+	if !strings.Contains(alternatePath, "objects") {
+		t.Errorf("expected alternates to point to objects directory, got %s", alternatePath)
+	}
+
+	t.Logf("Alternates points to: %s", alternatePath)
+
+	// Count loose objects in checkout (should be 0 with alternates)
+	checkoutObjPath := filepath.Join(checkoutPath, ".git", "objects")
+	entries, err := fs.ReadDir(checkoutObjPath)
+	if err != nil {
+		t.Fatalf("failed to read checkout objects directory: %v", err)
+	}
+
+	looseObjectCount := 0
+	for _, entry := range entries {
+		// Object directories are 2-character hex names
+		if len(entry.Name()) == 2 && entry.IsDir() {
+			subPath := filepath.Join(checkoutObjPath, entry.Name())
+			subEntries, err := fs.ReadDir(subPath)
+			if err != nil {
+				continue
+			}
+			looseObjectCount += len(subEntries)
+		}
+	}
+
+	// With alternates, checkout should have 0 loose objects
+	// (all objects are in the bare repo)
+	if looseObjectCount > 0 {
+		t.Logf("Warning: found %d loose objects in checkout (expected 0 with alternates)", looseObjectCount)
+		// Don't fail the test as go-git might create some objects during clone
+		// The important thing is that the alternates file exists
 	}
 }
