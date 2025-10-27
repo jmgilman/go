@@ -59,6 +59,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 h1:8Tjv8EJ+pM1xP8mK6egEbD1OgnV
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2/go.mod h1:pkJQ2tZHJ0aFOVEEot6oZmaVEZcRme73eIFmhiVuRWs=
 github.com/jmgilman/go/fs/core v0.1.0 h1:cB/TEMHUIXTWqgEHnvMfUIyY5yoUiZKedoK0rLaqnf8=
 github.com/jmgilman/go/fs/core v0.1.0/go.mod h1:ZSH+w+Q/qWw+zL2maTZb3xKz+iskC5RR1cwBeQjsdz8=
+github.com/jmgilman/go/fs/core v0.2.0 h1:zyI0Pv1aAS8A0PB+2o32xEmBHfl+W61hZ0I9Vd1i+04=
+github.com/jmgilman/go/fs/core v0.2.0/go.mod h1:ZSH+w+Q/qWw+zL2maTZb3xKz+iskC5RR1cwBeQjsdz8=
 github.com/jmgilman/go/fs/fstest v0.1.0 h1:gCUpIQdqaZJ4sntTeGefgI3QQp2LiAyOR9CIECQK9GA=
 github.com/jmgilman/go/fs/fstest v0.1.0/go.mod h1:IyFL1wBeIO/rA/MkWtA0iMpawJTj9NAw4h6xvqqaR1Y=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=

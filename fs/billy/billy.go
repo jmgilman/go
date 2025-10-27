@@ -302,6 +302,11 @@ func (lfs *LocalFS) Chroot(dir string) (core.FS, error) {
 	return &LocalFS{bfs: chrootFS}, nil
 }
 
+// Type returns FSTypeLocal for local filesystem implementations.
+func (lfs *LocalFS) Type() core.FSType {
+	return core.FSTypeLocal
+}
+
 // MemoryFS ReadFS interface implementation
 
 // Open opens the named file for reading.
@@ -523,6 +528,11 @@ func (mfs *MemoryFS) Chroot(dir string) (core.FS, error) {
 		return nil, err
 	}
 	return &MemoryFS{bfs: chrootFS}, nil
+}
+
+// Type returns FSTypeMemory for in-memory filesystem implementations.
+func (mfs *MemoryFS) Type() core.FSType {
+	return core.FSTypeMemory
 }
 
 // Compile-time interface checks.

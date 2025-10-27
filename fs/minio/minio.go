@@ -580,6 +580,11 @@ func (m *MinioFS) Chroot(dir string) (core.FS, error) {
 	}, nil
 }
 
+// Type returns FSTypeRemote for MinIO/S3 filesystem implementations.
+func (m *MinioFS) Type() core.FSType {
+	return core.FSTypeRemote
+}
+
 // parallelCopy copies objects from old to new prefix using a worker pool.
 // Returns the list of successfully copied object keys for cleanup.
 func (m *MinioFS) parallelCopy(ctx context.Context, oldPrefix, newPrefix string) ([]string, error) {

@@ -61,6 +61,26 @@ func TestMemoryFS_Unwrap(t *testing.T) {
 	}
 }
 
+// TestLocalFS_Type verifies LocalFS returns FSTypeLocal.
+func TestLocalFS_Type(t *testing.T) {
+	fs := NewLocal()
+	fsType := fs.Type()
+	if fsType != core.FSTypeLocal {
+		t.Errorf("LocalFS.Type() = %v (%s), want %v (%s)",
+			fsType, fsType.String(), core.FSTypeLocal, core.FSTypeLocal.String())
+	}
+}
+
+// TestMemoryFS_Type verifies MemoryFS returns FSTypeMemory.
+func TestMemoryFS_Type(t *testing.T) {
+	fs := NewMemory()
+	fsType := fs.Type()
+	if fsType != core.FSTypeMemory {
+		t.Errorf("MemoryFS.Type() = %v (%s), want %v (%s)",
+			fsType, fsType.String(), core.FSTypeMemory, core.FSTypeMemory.String())
+	}
+}
+
 // TestMemoryFS_BasicOperations verifies basic read/write operations work.
 func TestMemoryFS_BasicOperations(t *testing.T) {
 	fs := NewMemory()
