@@ -4,8 +4,6 @@ go 1.24.2
 
 replace github.com/jmgilman/go/oci => ../..
 
-require github.com/jmgilman/go/oci v0.0.0-00010101000000-000000000000
-
 require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect

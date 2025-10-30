@@ -3,7 +3,7 @@ module github.com/jmgilman/go/oci
 go 1.24.2
 
 require (
-	github.com/jmgilman/go/fs/billy v0.0.0-00010101000000-000000000000
+	github.com/jmgilman/go/fs/billy v0.1.1
 	github.com/jmgilman/go/fs/core v0.2.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
