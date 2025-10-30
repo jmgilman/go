@@ -4,6 +4,8 @@ package ocibundle
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -254,15 +256,7 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 	}
 
 	// Create temporary directory and file for the archive within our filesystem
-	var tempDir string
-	var tmpErr error
-	if tfs, ok := c.options.FS.(core.TempFS); ok {
-		tempDir, tmpErr = tfs.TempDir("", "ocibundle-push-")
-	} else {
-		// Fallback: use a fixed directory
-		tempDir = filepath.Join(os.TempDir(), "ocibundle-push-")
-		tmpErr = c.options.FS.MkdirAll(tempDir, 0755)
-	}
+	tempDir, tmpErr := c.createTempDir("ocibundle-push-")
 	if tmpErr != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
 	}
@@ -570,15 +564,7 @@ func (c *Client) extractAtomically(
 	opts ExtractOptions,
 ) error {
 	// Create a temporary directory for extraction
-	var tempDir string
-	var tmpErr error
-	if tfs, ok := c.options.FS.(core.TempFS); ok {
-		tempDir, tmpErr = tfs.TempDir("", "ocibundle-pull-")
-	} else {
-		// Fallback: use a fixed directory
-		tempDir = filepath.Join(os.TempDir(), "ocibundle-pull-")
-		tmpErr = c.options.FS.MkdirAll(tempDir, 0755)
-	}
+	tempDir, tmpErr := c.createTempDir("ocibundle-pull-")
 	if tmpErr != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
 	}
@@ -663,4 +649,35 @@ func (c *Client) removeAllFS(root string) error {
 		_ = c.options.FS.Remove(toDelete[i])
 	}
 	return nil
+}
+
+// createTempDir creates a unique temporary directory using TempFS interface if available,
+// otherwise creates a unique directory with the given pattern in the OS temp directory.
+func (c *Client) createTempDir(pattern string) (string, error) {
+	if tfs, ok := c.options.FS.(core.TempFS); ok {
+		return tfs.TempDir("", pattern)
+	}
+	// Fallback: create a unique directory manually
+	// Try multiple times to handle concurrent conflicts
+	for i := 0; i < 10; i++ {
+		// Generate unique name using hash of PID and iteration
+		randomBytes := make([]byte, 8)
+		hasher := sha256.New()
+		hasher.Write([]byte(fmt.Sprintf("%s-%d-%d", pattern, os.Getpid(), i)))
+		hasher.Write([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
+		copy(randomBytes, hasher.Sum(nil))
+		uniqueName := pattern + hex.EncodeToString(randomBytes)
+		path := filepath.Join(os.TempDir(), uniqueName)
+
+		// Try to create the directory
+		err := c.options.FS.MkdirAll(path, 0755)
+		if err == nil {
+			return path, nil
+		}
+		// If directory already exists, try again with different name
+		if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("failed to create unique temp directory after 10 attempts")
 }
