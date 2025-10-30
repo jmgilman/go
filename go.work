@@ -9,4 +9,5 @@ use (
 	./fs/fstest
 	./fs/minio
 	./git
+	./oci
 )
