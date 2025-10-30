@@ -6,8 +6,8 @@ import (
 	"context"
 	"io"
 
-	fsapi "github.com/input-output-hk/catalyst-forge-libs/fs"
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
+	"github.com/jmgilman/go/fs/core"
 )
 
 // Archiver handles compression/decompression of file bundles.
@@ -47,9 +47,9 @@ type Archiver interface {
 
 // NewTarGzArchiverWithFS returns a tar.gz archiver bound to the provided filesystem.
 // Phase 0 placeholder: the filesystem will be used internally starting in Phase 1.
-func NewTarGzArchiverWithFS(fsys fsapi.Filesystem) *TarGzArchiver {
+func NewTarGzArchiverWithFS(fsys core.FS) *TarGzArchiver {
 	if fsys == nil {
-		fsys = billyfs.NewBaseOSFS()
+		fsys = billy.NewLocal()
 	}
 	return &TarGzArchiver{fs: fsys}
 }
@@ -93,7 +93,7 @@ var DefaultExtractOptions = ExtractOptions{
 
 // DefaultArchiver returns an archiver initialized with the default OS-backed filesystem.
 func DefaultArchiver() *TarGzArchiver {
-	_ = billyfs.NewBaseOSFS() // reserved for future internal use
+	_ = billy.NewLocal() // reserved for future internal use
 	return NewTarGzArchiver()
 }
 

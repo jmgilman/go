@@ -6,16 +6,17 @@ import (
 	"testing"
 	"time"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
+	"github.com/jmgilman/go/fs/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTagCacheTest(t *testing.T) (*tagCache, *billyfs.FS, func()) {
+func setupTagCacheTest(t *testing.T) (*tagCache, core.FS, func()) {
 	t.Helper()
 
 	// Create in-memory filesystem for testing
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 
 	// Create storage
 	storage, err := NewStorage(fs, "/cache")
@@ -194,7 +195,7 @@ func TestTagCache_GetTagHistory(t *testing.T) {
 
 func TestTagCache_HistorySizeLimit(t *testing.T) {
 	// Create tag cache with small history limit
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 	storage, err := NewStorage(fs, "/cache")
 	require.NoError(t, err)
 
@@ -243,7 +244,7 @@ func TestTagCache_HistorySizeLimit(t *testing.T) {
 
 func TestTagCache_TTLExpiration(t *testing.T) {
 	// Create tag cache with short TTL
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 	storage, err := NewStorage(fs, "/cache")
 	require.NoError(t, err)
 
@@ -428,7 +429,7 @@ func TestIsValidReference(t *testing.T) {
 
 func TestTagCache_DisabledHistory(t *testing.T) {
 	// Create tag cache with history disabled
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 	storage, err := NewStorage(fs, "/cache")
 	require.NoError(t, err)
 

@@ -304,7 +304,7 @@ The client and archiver operate over an abstract filesystem interface so you can
 
 ```go
 import (
-    billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+    billyfs "github.com/jmgilman/go/fs/billy"
     ocibundle "github.com/jmgilman/go/oci"
 )
 
@@ -390,8 +390,8 @@ This module follows Go best practices and uses Test-Driven Development (TDD).
 
 ```bash
 # Clone the repository
-git clone https://github.com/input-output-hk/catalyst-forge-ai.git
-cd catalyst-forge-ai/lib/oci
+git clone https://github.com/jmgilman/go.git
+cd go/oci
 
 # Install dependencies
 go mod download

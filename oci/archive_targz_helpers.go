@@ -5,20 +5,21 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	fsapi "github.com/input-output-hk/catalyst-forge-libs/fs"
+	"github.com/jmgilman/go/fs/core"
 
 	validatepkg "github.com/jmgilman/go/oci/internal/validate"
 )
 
 // collectFileInfos walks the source directory and returns all entries with
 // their original path, relative path, and os.FileInfo.
-func collectFileInfos(fsys fsapi.Filesystem, sourceDir string) ([]fileInfoEntry, error) {
+func collectFileInfos(fsys core.FS, sourceDir string) ([]fileInfoEntry, error) {
 	var fileInfos []fileInfoEntry
-	walkErr := fsys.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+	walkErr := fsys.Walk(sourceDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("walk failed at %s: %w", path, err)
 		}
@@ -30,6 +31,11 @@ func collectFileInfos(fsys fsapi.Filesystem, sourceDir string) ([]fileInfoEntry,
 
 		if relPath == "." {
 			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("failed to get file info for %s: %w", path, err)
 		}
 
 		fileInfos = append(fileInfos, fileInfoEntry{
@@ -131,7 +137,7 @@ func safeJoin(rootAbs, targetDir, member string) (string, error) {
 }
 
 // ensureParentDir creates the parent directory for a path.
-func ensureParentDir(fsys fsapi.Filesystem, fullPath string) error {
+func ensureParentDir(fsys core.FS, fullPath string) error {
 	if err := fsys.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory for %s: %w", fullPath, err)
 	}
@@ -150,7 +156,7 @@ func handleHeader(
 	pv *validatepkg.PathTraversalValidator,
 	totalSize *int64,
 	fileCount *int,
-	fsys fsapi.Filesystem,
+	fsys core.FS,
 ) error {
 	if err := isDone(ctx, "extraction"); err != nil {
 		return err
@@ -238,7 +244,7 @@ func performExtraction(
 	fullPath string,
 	opts ExtractOptions,
 	pv *validatepkg.PathTraversalValidator,
-	fsys fsapi.Filesystem,
+	fsys core.FS,
 ) error {
 	switch hdr.Typeflag {
 	case tar.TypeDir:
@@ -260,7 +266,7 @@ func performExtraction(
 }
 
 // extractDir creates a directory.
-func extractDir(fsys fsapi.Filesystem, fullPath string) error {
+func extractDir(fsys core.FS, fullPath string) error {
 	if err := fsys.MkdirAll(fullPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", fullPath, err)
 	}
@@ -268,7 +274,7 @@ func extractDir(fsys fsapi.Filesystem, fullPath string) error {
 }
 
 // extractRegularFile writes out a regular file from a tar reader.
-func extractRegularFile(fsys fsapi.Filesystem, tr *tar.Reader, fullPath string) error {
+func extractRegularFile(fsys core.FS, tr *tar.Reader, fullPath string) error {
 	file, err := fsys.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to create file %s: %w", fullPath, err)
@@ -283,7 +289,7 @@ func extractRegularFile(fsys fsapi.Filesystem, tr *tar.Reader, fullPath string) 
 
 // extractSymlink creates a symlink after validator approval.
 func extractSymlink(
-	fsys fsapi.Filesystem,
+	fsys core.FS,
 	pv *validatepkg.PathTraversalValidator,
 	hdr *tar.Header,
 	fullPath string,
@@ -292,8 +298,15 @@ func extractSymlink(
 	if err := pv.ValidateSymlink(hdr.Name, linkTarget); err != nil {
 		return NewBundleError("extract", hdr.Name, ErrSecurityViolation)
 	}
-	if err := fsys.Symlink(linkTarget, fullPath); err != nil {
-		return fmt.Errorf("failed to create symlink %s -> %s: %w", fullPath, linkTarget, err)
+
+	// Check if filesystem supports symlinks
+	if sfs, ok := fsys.(core.SymlinkFS); ok {
+		if err := sfs.Symlink(linkTarget, fullPath); err != nil {
+			return fmt.Errorf("failed to create symlink %s -> %s: %w", fullPath, linkTarget, err)
+		}
+		return nil
 	}
+
+	// If symlinks not supported, skip silently or log warning
 	return nil
 }

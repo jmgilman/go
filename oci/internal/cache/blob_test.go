@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -581,7 +581,7 @@ func createTestBlobCache(t *testing.T) BlobCache {
 
 func createTestStorage(t *testing.T) *Storage {
 	// Create in-memory filesystem for testing
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 
 	storage, err := NewStorage(fs, "/cache")
 	require.NoError(t, err)

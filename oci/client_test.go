@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -801,7 +801,7 @@ func (m *mockReadCloserForTest) Close() error {
 
 func TestClient_WithMemFS_PushAndPull_WithMocks(t *testing.T) {
 	// Setup in-memory filesystem
-	mem := billyfs.NewInMemoryFS()
+	mem := billy.NewMemory()
 
 	// Write a simple source tree into memfs
 	require.NoError(t, mem.MkdirAll("/src", 0o755))

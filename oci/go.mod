@@ -3,12 +3,18 @@ module github.com/jmgilman/go/oci
 go 1.24.2
 
 require (
-	github.com/input-output-hk/catalyst-forge-libs/fs v0.0.0-20250914043305-4f07fbfbeb4b
+	github.com/jmgilman/go/fs/billy v0.0.0-00010101000000-000000000000
+	github.com/jmgilman/go/fs/core v0.2.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.38.0
 	oras.land/oras-go/v2 v2.6.0
+)
+
+replace (
+	github.com/jmgilman/go/fs/billy => ../fs/billy
+	github.com/jmgilman/go/fs/core => ../fs/core
 )
 
 require (
@@ -49,7 +55,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.5 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
@@ -65,9 +70,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.8.0 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

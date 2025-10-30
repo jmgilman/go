@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/core"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -36,7 +36,7 @@ type Coordinator struct {
 func NewCoordinator(
 	ctx context.Context,
 	config Config,
-	fs *billyfs.FS,
+	fs core.FS,
 	cachePath string,
 	logger *Logger,
 ) (*Coordinator, error) {

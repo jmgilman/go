@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,7 +15,8 @@ import (
 	"sync"
 	"time"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
+	"github.com/jmgilman/go/fs/core"
 	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/jmgilman/go/oci/internal/cache"
@@ -64,7 +66,7 @@ func NewWithOptions(opts ...ClientOption) (*Client, error) {
 
 	// Ensure filesystem default
 	if options.FS == nil {
-		options.FS = billyfs.NewBaseOSFS()
+		options.FS = billy.NewLocal()
 	}
 
 	// Use provided ORAS client or default to real implementation
@@ -252,7 +254,15 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 	}
 
 	// Create temporary directory and file for the archive within our filesystem
-	tempDir, tmpErr := c.options.FS.TempDir("", "ocibundle-push-")
+	var tempDir string
+	var tmpErr error
+	if tfs, ok := c.options.FS.(core.TempFS); ok {
+		tempDir, tmpErr = tfs.TempDir("", "ocibundle-push-")
+	} else {
+		// Fallback: use a fixed directory
+		tempDir = filepath.Join(os.TempDir(), "ocibundle-push-")
+		tmpErr = c.options.FS.MkdirAll(tempDir, 0755)
+	}
 	if tmpErr != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
 	}
@@ -291,9 +301,11 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 
 	// Push the artifact with retry logic
 	pushErr := retryOperation(ctx, pushOpts.MaxRetries, pushOpts.RetryDelay, func() error {
-		// Rewind before each attempt
-		if _, seekErr := tempFile.Seek(0, io.SeekStart); seekErr != nil {
-			return fmt.Errorf("failed to seek temporary file: %w", seekErr)
+		// Rewind before each attempt (if file supports seeking)
+		if seeker, ok := tempFile.(io.Seeker); ok {
+			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
+				return fmt.Errorf("failed to seek temporary file: %w", seekErr)
+			}
 		}
 		// Recreate descriptor to ensure fresh reader for each attempt
 		desc := &oras.PushDescriptor{
@@ -558,7 +570,15 @@ func (c *Client) extractAtomically(
 	opts ExtractOptions,
 ) error {
 	// Create a temporary directory for extraction
-	tempDir, tmpErr := c.options.FS.TempDir("", "ocibundle-pull-")
+	var tempDir string
+	var tmpErr error
+	if tfs, ok := c.options.FS.(core.TempFS); ok {
+		tempDir, tmpErr = tfs.TempDir("", "ocibundle-pull-")
+	} else {
+		// Fallback: use a fixed directory
+		tempDir = filepath.Join(os.TempDir(), "ocibundle-pull-")
+		tmpErr = c.options.FS.MkdirAll(tempDir, 0755)
+	}
 	if tmpErr != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
 	}
@@ -586,7 +606,7 @@ func (c *Client) extractAtomically(
 
 // moveFiles moves all files from srcDir to dstDir
 func (c *Client) moveFiles(srcDir, dstDir string) error {
-	if err := c.options.FS.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
+	if err := c.options.FS.Walk(srcDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return fmt.Errorf("failed to walk path %s: %w", path, walkErr)
 		}
@@ -605,8 +625,12 @@ func (c *Client) moveFiles(srcDir, dstDir string) error {
 		// Calculate destination path
 		dstPath := filepath.Join(dstDir, relPath)
 
-		if info.IsDir() {
+		if d.IsDir() {
 			// Create directory
+			info, err := d.Info()
+			if err != nil {
+				return fmt.Errorf("failed to get dir info: %w", err)
+			}
 			if mkErr := c.options.FS.MkdirAll(dstPath, info.Mode()); mkErr != nil {
 				return fmt.Errorf("failed to create directory %s: %w", dstPath, mkErr)
 			}
@@ -627,7 +651,7 @@ func (c *Client) moveFiles(srcDir, dstDir string) error {
 func (c *Client) removeAllFS(root string) error {
 	// Simple recursive delete using Walk in reverse order: files before dirs.
 	var toDelete []string
-	_ = c.options.FS.Walk(root, func(path string, info os.FileInfo, err error) error {
+	_ = c.options.FS.Walk(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -518,7 +518,7 @@ func TestTarGzArchiver_SecurityLimits(t *testing.T) {
 
 // TestTarGzArchiver_MemFS_RoundTrip tests archive/extract using an in-memory filesystem
 func TestTarGzArchiver_MemFS_RoundTrip(t *testing.T) {
-	tempFS := billyfs.NewInMemoryFS()
+	tempFS := billy.NewMemory()
 
 	// Build source tree in memfs
 	require.NoError(t, tempFS.MkdirAll("/src/sub", 0o755))

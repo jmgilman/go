@@ -7,19 +7,19 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	parentfs "github.com/input-output-hk/catalyst-forge-libs/fs"
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/core"
 )
 
 // Storage provides atomic, corruption-resistant filesystem operations for cache storage.
-// It uses billyfs.FS for filesystem abstraction, supporting both OS and in-memory filesystems.
+// It uses core.FS for filesystem abstraction, supporting both OS and in-memory filesystems.
 type Storage struct {
-	fs         *billyfs.FS
+	fs         core.FS
 	rootPath   string
 	tempDir    string
 	fileLocks  *sync.Map // map[string]*sync.Mutex for per-file locking
@@ -28,7 +28,7 @@ type Storage struct {
 
 // NewStorage creates a new storage instance with the given filesystem and root path.
 // The filesystem abstraction allows testing with in-memory filesystems.
-func NewStorage(fs *billyfs.FS, rootPath string) (*Storage, error) {
+func NewStorage(fs core.FS, rootPath string) (*Storage, error) {
 	if fs == nil {
 		return nil, fmt.Errorf("filesystem cannot be nil")
 	}
@@ -62,6 +62,36 @@ func (s *Storage) getFileLock(path string) *sync.Mutex {
 	return lock.(*sync.Mutex)
 }
 
+// createTempDir creates a temporary directory, using TempFS interface if available
+func (s *Storage) createTempDir(dir, pattern string) (string, error) {
+	if tfs, ok := s.fs.(core.TempFS); ok {
+		return tfs.TempDir(dir, pattern)
+	}
+	// Fallback: create a unique directory manually
+	// Try multiple times to handle concurrent conflicts
+	for i := 0; i < 10; i++ {
+		// Generate unique name using random hex string
+		randomBytes := make([]byte, 8)
+		hasher := sha256.New()
+		hasher.Write([]byte(fmt.Sprintf("%s-%d-%d", pattern, os.Getpid(), i)))
+		hasher.Write([]byte(fmt.Sprintf("%d", ^uint(0)))) // Add pseudo-random data
+		copy(randomBytes, hasher.Sum(nil))
+		uniqueName := pattern + hex.EncodeToString(randomBytes)
+		path := filepath.Join(dir, uniqueName)
+
+		// Try to create the directory
+		err := s.fs.MkdirAll(path, 0755)
+		if err == nil {
+			return path, nil
+		}
+		// If directory already exists, try again with different name
+		if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("failed to create unique temp directory after 10 attempts")
+}
+
 // WriteAtomically writes data to a file atomically using a temporary file and rename.
 // This ensures that either the complete file is written or nothing is written,
 // preventing partial/corrupted files from being visible to readers.
@@ -88,24 +118,21 @@ func (s *Storage) WriteAtomically(ctx context.Context, path string, data []byte)
 
 	// Create temporary file in temp directory (protected by global lock)
 	s.globalLock.Lock()
-	tempDirName, err := s.fs.TempDir(s.tempDir, "cache_")
+	tempDirName, err := s.createTempDir(s.tempDir, "cache_")
 	s.globalLock.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	tempFile := filepath.Join(tempDirName, "temp")
-	defer func() {
-		// Clean up temp directory if it still exists (protected by global lock)
-		s.globalLock.Lock()
-		if exists, _ := s.fs.Exists(tempDirName); exists {
-			_ = s.fs.Remove(tempDirName) // Ignore errors in cleanup
-		}
-		s.globalLock.Unlock()
-	}()
 
 	// Write data to temp file
 	err = s.writeWithChecksum(tempFile, data)
 	if err != nil {
+		// Clean up temp directory on error
+		s.globalLock.Lock()
+		_ = s.fs.Remove(tempFile) // Ignore errors
+		_ = s.fs.Remove(tempDirName)
+		s.globalLock.Unlock()
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
@@ -114,8 +141,18 @@ func (s *Storage) WriteAtomically(ctx context.Context, path string, data []byte)
 	err = s.fs.Rename(tempFile, fullPath)
 	s.globalLock.Unlock()
 	if err != nil {
+		// Clean up temp directory on error
+		s.globalLock.Lock()
+		_ = s.fs.Remove(tempFile)
+		_ = s.fs.Remove(tempDirName)
+		s.globalLock.Unlock()
 		return fmt.Errorf("failed to rename temp file to %q: %w", fullPath, err)
 	}
+
+	// Clean up temp directory after successful rename
+	s.globalLock.Lock()
+	_ = s.fs.Remove(tempDirName) // File was renamed, so directory should be empty
+	s.globalLock.Unlock()
 
 	return nil
 }
@@ -241,11 +278,15 @@ func (s *Storage) Size(ctx context.Context) (int64, error) {
 	}
 
 	var totalSize int64
-	walkFn := func(path string, info os.FileInfo, err error) error {
+	walkFn := func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
 			totalSize += info.Size()
 		}
 		return nil
@@ -344,7 +385,7 @@ func (s *Storage) cleanupTempDirectory(dir string) error {
 
 	// Protected by global lock
 	s.globalLock.Lock()
-	walkErr := s.fs.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+	walkErr := s.fs.Walk(dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -372,7 +413,7 @@ type StreamWriter struct {
 	storage     *Storage
 	tempPath    string
 	tempDirName string
-	file        parentfs.File
+	file        core.File
 	hasher      hash.Hash
 	size        int64
 	finalPath   string
@@ -402,7 +443,7 @@ func (s *Storage) NewStreamWriter(ctx context.Context, path string) (*StreamWrit
 	}
 
 	// Create temp file
-	tempDirName, err := s.fs.TempDir(s.tempDir, "stream_")
+	tempDirName, err := s.createTempDir(s.tempDir, "stream_")
 	if err != nil {
 		s.globalLock.Unlock()
 		lock.Unlock()

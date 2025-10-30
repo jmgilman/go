@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	fsapi "github.com/input-output-hk/catalyst-forge-libs/fs"
+	"github.com/jmgilman/go/fs/core"
 	"oras.land/oras-go/v2/registry/remote/auth"
 
 	"github.com/jmgilman/go/oci/internal/cache"
@@ -27,7 +27,7 @@ type ClientOptions struct {
 
 	// FS provides filesystem operations for archive/temp/extraction handling.
 	// If nil, a default OS-backed filesystem will be used.
-	FS fsapi.Filesystem
+	FS core.FS
 
 	// CacheConfig contains cache configuration for OCI operations.
 	// If nil, caching is disabled.
@@ -423,7 +423,7 @@ func DefaultClientOptions() *ClientOptions {
 }
 
 // WithFilesystem injects a custom filesystem implementation used by the client.
-func WithFilesystem(fsys fsapi.Filesystem) ClientOption {
+func WithFilesystem(fsys core.FS) ClientOption {
 	return func(opts *ClientOptions) {
 		opts.FS = fsys
 	}

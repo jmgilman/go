@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
 	"github.com/jmgilman/go/oci/internal/cache"
 	"github.com/jmgilman/go/oci/internal/testutil"
 )
@@ -74,7 +74,7 @@ func (suite *CacheIntegrationTestSuite) SetupSuite() {
 	suite.logger = cache.NewLogger(cache.LogConfig{Level: cache.LogLevelInfo})
 
 	// Initialize filesystem
-	fs := billyfs.NewOSFS(suite.cacheDir)
+	fs := billy.NewLocal()
 
 	// Create cache coordinator
 	config := cache.Config{

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
@@ -40,7 +40,7 @@ func setupTestManager(t *testing.T, config Config) *Coordinator {
 	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
 	// Create filesystem
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 
 	ctx := context.Background()
 	coordinator, err := NewCoordinator(ctx, config, fs, tempDir, nil)
@@ -228,7 +228,7 @@ func TestCoordinator_PerformCleanup(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
 	// Create filesystem
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 
 	ctx := context.Background()
 	coordinator, err := NewCoordinator(ctx, config, fs, tempDir, nil)
@@ -397,7 +397,7 @@ func TestCoordinator_InvalidConfig(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -417,7 +417,7 @@ func TestCoordinator_CachePath(t *testing.T) {
 
 	cachePath := filepath.Join(tempDir, "cache")
 
-	fs := billyfs.NewInMemoryFS()
+	fs := billy.NewMemory()
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -540,7 +540,7 @@ func TestCoordinator_IndexRecovery(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create first coordinator and add data
-	fs1 := billyfs.NewInMemoryFS()
+	fs1 := billy.NewMemory()
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -563,7 +563,7 @@ func TestCoordinator_IndexRecovery(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create second coordinator (should load persisted index)
-	fs2 := billyfs.NewInMemoryFS()
+	fs2 := billy.NewMemory()
 	require.NoError(t, err)
 
 	coordinator2, err := NewCoordinator(ctx, config, fs2, tempDir, nil)

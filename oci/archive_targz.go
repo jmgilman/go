@@ -9,12 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
 
-	fsapi "github.com/input-output-hk/catalyst-forge-libs/fs"
-	billyfs "github.com/input-output-hk/catalyst-forge-libs/fs/billy"
+	"github.com/jmgilman/go/fs/billy"
+	"github.com/jmgilman/go/fs/core"
 
 	validatepkg "github.com/jmgilman/go/oci/internal/validate"
 )
@@ -24,14 +25,14 @@ import (
 // comprehensive validation and progress reporting capabilities.
 // Uses concurrent processing for improved performance on multi-core systems.
 type TarGzArchiver struct {
-	fs fsapi.Filesystem
+	fs core.FS
 }
 
 // NewTarGzArchiver creates a new TarGzArchiver instance.
 // The archiver uses standard tar.gz format compatible with common tools
 // and implements security validation during extraction.
 func NewTarGzArchiver() *TarGzArchiver {
-	return &TarGzArchiver{fs: billyfs.NewBaseOSFS()}
+	return &TarGzArchiver{fs: billy.NewLocal()}
 }
 
 // Archive creates a tar.gz archive from the specified source directory.
@@ -83,12 +84,18 @@ func (a *TarGzArchiver) ArchiveWithProgress(
 	// If progress callback is provided, calculate total size first
 	var totalSize int64
 	if progress != nil {
-		er := a.fs.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+		er := a.fs.Walk(sourceDir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if info.Mode().IsRegular() {
-				totalSize += info.Size()
+			if !d.IsDir() {
+				info, err := d.Info()
+				if err != nil {
+					return err
+				}
+				if info.Mode().IsRegular() {
+					totalSize += info.Size()
+				}
 			}
 			return nil
 		})
