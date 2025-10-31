@@ -20,7 +20,7 @@ import (
 	orasint "github.com/jmgilman/go/oci/internal/oras"
 )
 
-// TestNewPublicKeyVerifier tests creating a public key verifier
+// TestNewPublicKeyVerifier tests creating a public key verifier.
 func TestNewPublicKeyVerifier(t *testing.T) {
 	// Generate a test RSA key
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -44,7 +44,7 @@ func TestNewPublicKeyVerifier(t *testing.T) {
 	}
 }
 
-// TestNewKeylessVerifier tests creating a keyless verifier
+// TestNewKeylessVerifier tests creating a keyless verifier.
 func TestNewKeylessVerifier(t *testing.T) {
 	verifier := NewKeylessVerifier(
 		WithAllowedIdentities("*@example.com"),
@@ -73,7 +73,7 @@ func TestNewKeylessVerifier(t *testing.T) {
 	}
 }
 
-// TestPolicyValidation tests policy validation
+// TestPolicyValidation tests policy validation.
 func TestPolicyValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -140,7 +140,7 @@ func TestPolicyValidation(t *testing.T) {
 	}
 }
 
-// TestPolicyIdentityMatching tests identity pattern matching
+// TestPolicyIdentityMatching tests identity pattern matching.
 func TestPolicyIdentityMatching(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -211,7 +211,7 @@ func TestPolicyIdentityMatching(t *testing.T) {
 	}
 }
 
-// TestLoadPublicKeyFromBytes tests loading public keys from byte arrays
+// TestLoadPublicKeyFromBytes tests loading public keys from byte arrays.
 func TestLoadPublicKeyFromBytes(t *testing.T) {
 	// Generate test keys
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -265,7 +265,7 @@ func TestLoadPublicKeyFromBytes(t *testing.T) {
 	}
 }
 
-// TestLoadPublicKeyFromFile tests loading public keys from files
+// TestLoadPublicKeyFromFile tests loading public keys from files.
 func TestLoadPublicKeyFromFile(t *testing.T) {
 	// Generate test key
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -303,7 +303,7 @@ func TestLoadPublicKeyFromFile(t *testing.T) {
 // construction is now handled internally by Cosign's VerifyImageSignatures API.
 // This was an implementation detail that is no longer exposed.
 
-// TestVerifyInterface tests that CosignVerifier implements the SignatureVerifier interface
+// TestVerifyInterface tests that CosignVerifier implements the SignatureVerifier interface.
 func TestVerifyInterface(t *testing.T) {
 	// Generate test key
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -354,7 +354,7 @@ func TestVerifyInterface(t *testing.T) {
 	}
 }
 
-// TestVerifierOptions tests that options are properly applied
+// TestVerifierOptions tests that options are properly applied.
 func TestVerifierOptions(t *testing.T) {
 	t.Run("WithRequireAll", func(t *testing.T) {
 		verifier := NewKeylessVerifier(
@@ -460,7 +460,7 @@ func TestVerifierOptions(t *testing.T) {
 	})
 }
 
-// Helper function to encode a public key as PEM
+// Helper function to encode a public key as PEM.
 func encodePublicKeyPEM(pubKey crypto.PublicKey) []byte {
 	derBytes, err := x509.MarshalPKIXPublicKey(pubKey)
 	if err != nil {

@@ -463,7 +463,7 @@ func TestSecurity_PublicKeyValidation(t *testing.T) {
 	}
 }
 
-// Helper function to check if error is a signature error
+// Helper function to check if error is a signature error.
 func isSignatureError(err error, bundleErr **ocibundle.BundleError) bool {
 	if err == nil {
 		return false

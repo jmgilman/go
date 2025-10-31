@@ -184,84 +184,8 @@ func NewKeylessVerifier(opts ...VerifierOption) *CosignVerifier {
 // Returns nil if verification succeeds, or a BundleError with details if it fails.
 func (v *CosignVerifier) Verify(ctx context.Context, reference string, descriptor *orasint.PullDescriptor) error {
 	// Validate input parameters
-	if descriptor == nil {
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: reference,
-			Err:       fmt.Errorf("descriptor cannot be nil"),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       "",
-				Reason:       "Invalid input: descriptor is nil",
-				FailureStage: "validation",
-			},
-		}
-	}
-
-	if descriptor.Digest == "" {
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: reference,
-			Err:       fmt.Errorf("descriptor digest cannot be empty"),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       "",
-				Reason:       "Invalid input: digest is empty",
-				FailureStage: "validation",
-			},
-		}
-	}
-
-	// Validate digest format (should be "algorithm:hex")
-	if !strings.Contains(descriptor.Digest, ":") {
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: reference,
-			Err:       fmt.Errorf("invalid digest format"),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       descriptor.Digest,
-				Reason:       fmt.Sprintf("Invalid digest format: %s (expected 'algorithm:hex')", descriptor.Digest),
-				FailureStage: "validation",
-			},
-		}
-	}
-
-	if descriptor.Size <= 0 {
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: reference,
-			Err:       fmt.Errorf("descriptor size must be positive"),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       descriptor.Digest,
-				Reason:       fmt.Sprintf("Invalid input: size is %d", descriptor.Size),
-				FailureStage: "validation",
-			},
-		}
-	}
-
-	if reference == "" {
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: "",
-			Err:       fmt.Errorf("reference cannot be empty"),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       descriptor.Digest,
-				Reason:       "Invalid input: reference is empty",
-				FailureStage: "validation",
-			},
-		}
-	}
-
-	// Validate policy configuration
-	if err := v.policy.Validate(); err != nil {
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: reference,
-			Err:       fmt.Errorf("invalid verification policy: %w", err),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       descriptor.Digest,
-				Reason:       fmt.Sprintf("Invalid verification policy: %s", err.Error()),
-				FailureStage: "policy",
-			},
-		}
+	if err := v.validateVerifyInputs(reference, descriptor); err != nil {
+		return err
 	}
 
 	// Check cache if enabled
@@ -325,51 +249,7 @@ func (v *CosignVerifier) Verify(ctx context.Context, reference string, descripto
 	// This replaces our manual signature discovery and verification
 	verifiedSignatures, _, err := cosign.VerifyImageSignatures(ctx, ref, checkOpts)
 	if err != nil {
-		// Check if error indicates no signatures found
-		if isNotFoundError(err) || strings.Contains(err.Error(), "no matching signatures") {
-			// Signature not found - apply verification mode policy
-			if v.policy.VerificationMode == VerificationModeEnforce {
-				return &ocibundle.BundleError{
-					Op:        "verify",
-					Reference: reference,
-					Err:       ocibundle.ErrSignatureNotFound,
-					SignatureInfo: &ocibundle.SignatureErrorInfo{
-						Digest:       descriptor.Digest,
-						Reason:       fmt.Sprintf("No signature found for artifact (enforce mode): %s", err.Error()),
-						FailureStage: "fetch",
-					},
-				}
-			} else if v.policy.VerificationMode == VerificationModeOptional {
-				// Optional mode: signature missing is allowed
-				return nil
-			}
-			// Required mode: signature missing is allowed, but invalid signatures fail
-			return nil
-		}
-
-		// Verification failed with an error
-		// Determine if this is a validation error or a fetch error
-		failureStage := "cryptographic"
-		if strings.Contains(err.Error(), "identity") || strings.Contains(err.Error(), "issuer") {
-			failureStage = "identity"
-		} else if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "cert") {
-			failureStage = "certificate"
-		} else if strings.Contains(err.Error(), "rekor") || strings.Contains(err.Error(), "transparency") {
-			failureStage = "rekor"
-		} else if strings.Contains(err.Error(), "annotation") {
-			failureStage = "policy"
-		}
-
-		return &ocibundle.BundleError{
-			Op:        "verify",
-			Reference: reference,
-			Err:       fmt.Errorf("verification failed: %w", err),
-			SignatureInfo: &ocibundle.SignatureErrorInfo{
-				Digest:       descriptor.Digest,
-				Reason:       err.Error(),
-				FailureStage: failureStage,
-			},
-		}
+		return v.handleVerificationError(err, reference, descriptor)
 	}
 
 	// Count verified signatures
@@ -572,4 +452,148 @@ func validateKeyStrength(pubKey crypto.PublicKey) error {
 	default:
 		return fmt.Errorf("unsupported key type: %T", pubKey)
 	}
+}
+
+// handleVerificationError processes verification errors and applies policy rules.
+func (v *CosignVerifier) handleVerificationError(err error, reference string, descriptor *orasint.PullDescriptor) error {
+	// Check if error indicates no signatures found
+	if isNotFoundError(err) || strings.Contains(err.Error(), "no matching signatures") {
+		// Signature not found - apply verification mode policy
+		switch v.policy.VerificationMode {
+		case VerificationModeEnforce:
+			return &ocibundle.BundleError{
+				Op:        "verify",
+				Reference: reference,
+				Err:       ocibundle.ErrSignatureNotFound,
+				SignatureInfo: &ocibundle.SignatureErrorInfo{
+					Digest:       descriptor.Digest,
+					Reason:       fmt.Sprintf("No signature found for artifact (enforce mode): %s", err.Error()),
+					FailureStage: "fetch",
+				},
+			}
+		case VerificationModeOptional:
+			// Optional mode: signature missing is allowed
+			return nil
+		default:
+			// Required mode: signature missing is allowed, but invalid signatures fail
+			return nil
+		}
+	}
+
+	// Verification failed with an error - determine failure stage
+	failureStage := determineFailureStage(err)
+
+	return &ocibundle.BundleError{
+		Op:        "verify",
+		Reference: reference,
+		Err:       fmt.Errorf("verification failed: %w", err),
+		SignatureInfo: &ocibundle.SignatureErrorInfo{
+			Digest:       descriptor.Digest,
+			Reason:       err.Error(),
+			FailureStage: failureStage,
+		},
+	}
+}
+
+// determineFailureStage analyzes an error to determine which stage of verification failed.
+func determineFailureStage(err error) string {
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "identity") || strings.Contains(errMsg, "issuer") {
+		return "identity"
+	}
+	if strings.Contains(errMsg, "certificate") || strings.Contains(errMsg, "cert") {
+		return "certificate"
+	}
+	if strings.Contains(errMsg, "rekor") || strings.Contains(errMsg, "transparency") {
+		return "rekor"
+	}
+	if strings.Contains(errMsg, "annotation") {
+		return "policy"
+	}
+	return "cryptographic"
+}
+
+// validateVerifyInputs validates the inputs to the Verify function.
+func (v *CosignVerifier) validateVerifyInputs(reference string, descriptor *orasint.PullDescriptor) error {
+	if descriptor == nil {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("descriptor cannot be nil"),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       "",
+				Reason:       "Invalid input: descriptor is nil",
+				FailureStage: "validation",
+			},
+		}
+	}
+
+	if descriptor.Digest == "" {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("descriptor digest cannot be empty"),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       "",
+				Reason:       "Invalid input: digest is empty",
+				FailureStage: "validation",
+			},
+		}
+	}
+
+	// Validate digest format (should be "algorithm:hex")
+	if !strings.Contains(descriptor.Digest, ":") {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("invalid digest format"),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       fmt.Sprintf("Invalid digest format: %s (expected 'algorithm:hex')", descriptor.Digest),
+				FailureStage: "validation",
+			},
+		}
+	}
+
+	if descriptor.Size <= 0 {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("descriptor size must be positive"),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       fmt.Sprintf("Invalid input: size is %d", descriptor.Size),
+				FailureStage: "validation",
+			},
+		}
+	}
+
+	if reference == "" {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: "",
+			Err:       fmt.Errorf("reference cannot be empty"),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       "Invalid input: reference is empty",
+				FailureStage: "validation",
+			},
+		}
+	}
+
+	// Validate policy configuration
+	if err := v.policy.Validate(); err != nil {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("invalid verification policy: %w", err),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       fmt.Sprintf("Invalid verification policy: %s", err.Error()),
+				FailureStage: "policy",
+			},
+		}
+	}
+
+	return nil
 }

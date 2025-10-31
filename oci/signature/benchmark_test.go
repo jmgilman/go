@@ -74,7 +74,7 @@ func BenchmarkVerificationWithCacheHit(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create cache: %v", err)
 	}
-	defer coordinator.Close()
+	defer func() { _ = coordinator.Close() }()
 
 	// Create verifier with cache
 	verifier := NewKeylessVerifier(
@@ -124,7 +124,7 @@ func BenchmarkVerificationWithCacheMiss(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create cache: %v", err)
 	}
-	defer coordinator.Close()
+	defer func() { _ = coordinator.Close() }()
 
 	// Create verifier with cache
 	verifier := NewKeylessVerifier(
@@ -327,7 +327,7 @@ func BenchmarkCacheOperations(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to create cache: %v", err)
 	}
-	defer coordinator.Close()
+	defer func() { _ = coordinator.Close() }()
 
 	result := &cache.VerificationResult{
 		Digest:     "sha256:abc123",
@@ -355,8 +355,8 @@ func BenchmarkCacheOperations(b *testing.B) {
 	})
 }
 
-// Helper function to encode public key to PEM
-func encodePublicKeyToPEM(pubKey crypto.PublicKey) []byte {
+// Helper function to encode public key to PEM.
+func encodePublicKeyToPEM(_ crypto.PublicKey) []byte {
 	// Simplified encoding for benchmark
 	// In reality, this would use x509.MarshalPKIXPublicKey
 	return []byte("-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----")

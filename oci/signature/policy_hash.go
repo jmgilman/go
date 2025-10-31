@@ -42,11 +42,11 @@ func ComputePolicyHash(policy *Policy) string {
 	h := sha256.New()
 
 	// Add verification mode
-	fmt.Fprintf(h, "verification_mode:%s\n", policy.VerificationMode.String())
+	_, _ = fmt.Fprintf(h, "verification_mode:%s\n", policy.VerificationMode.String())
 
 	// Add multi-signature mode
-	fmt.Fprintf(h, "multi_signature_mode:%s\n", policy.MultiSignatureMode.String())
-	fmt.Fprintf(h, "minimum_signatures:%d\n", policy.MinimumSignatures)
+	_, _ = fmt.Fprintf(h, "multi_signature_mode:%s\n", policy.MultiSignatureMode.String())
+	_, _ = fmt.Fprintf(h, "minimum_signatures:%d\n", policy.MinimumSignatures)
 
 	// Add public keys (if present)
 	if len(policy.PublicKeys) > 0 {
@@ -59,7 +59,7 @@ func ComputePolicyHash(policy *Policy) string {
 		// Sort for determinism
 		sort.Strings(keyFingerprints)
 		for _, fp := range keyFingerprints {
-			fmt.Fprintf(h, "public_key:%s\n", fp)
+			_, _ = fmt.Fprintf(h, "public_key:%s\n", fp)
 		}
 	}
 
@@ -69,13 +69,13 @@ func ComputePolicyHash(policy *Policy) string {
 		copy(identities, policy.AllowedIdentities)
 		sort.Strings(identities)
 		for _, identity := range identities {
-			fmt.Fprintf(h, "allowed_identity:%s\n", identity)
+			_, _ = fmt.Fprintf(h, "allowed_identity:%s\n", identity)
 		}
 	}
 
 	// Add required issuer
 	if policy.RequiredIssuer != "" {
-		fmt.Fprintf(h, "required_issuer:%s\n", policy.RequiredIssuer)
+		_, _ = fmt.Fprintf(h, "required_issuer:%s\n", policy.RequiredIssuer)
 	}
 
 	// Add required annotations (sorted by key for determinism)
@@ -89,14 +89,14 @@ func ComputePolicyHash(policy *Policy) string {
 
 		// Add annotations in sorted key order
 		for _, k := range keys {
-			fmt.Fprintf(h, "annotation:%s=%s\n", k, policy.RequiredAnnotations[k])
+			_, _ = fmt.Fprintf(h, "annotation:%s=%s\n", k, policy.RequiredAnnotations[k])
 		}
 	}
 
 	// Add Rekor settings
-	fmt.Fprintf(h, "rekor_enabled:%t\n", policy.RekorEnabled)
+	_, _ = fmt.Fprintf(h, "rekor_enabled:%t\n", policy.RekorEnabled)
 	if policy.RekorURL != "" {
-		fmt.Fprintf(h, "rekor_url:%s\n", policy.RekorURL)
+		_, _ = fmt.Fprintf(h, "rekor_url:%s\n", policy.RekorURL)
 	}
 
 	// Compute final hash
@@ -140,17 +140,17 @@ func computeKeyFingerprint(key crypto.PublicKey) string {
 // invalidated without computing full hashes.
 //
 // Returns true if the policies are different in ways that affect verification.
-func PolicyChanged(old *Policy, new *Policy) bool {
-	if old == nil && new == nil {
+func PolicyChanged(old *Policy, current *Policy) bool {
+	if old == nil && current == nil {
 		return false
 	}
-	if old == nil || new == nil {
+	if old == nil || current == nil {
 		return true
 	}
 
 	// Compare hashes - if they differ, policy changed
 	oldHash := ComputePolicyHash(old)
-	newHash := ComputePolicyHash(new)
+	newHash := ComputePolicyHash(current)
 	return oldHash != newHash
 }
 
@@ -175,11 +175,7 @@ func ValidatePolicyForCaching(policy *Policy) error {
 		return fmt.Errorf("cannot cache with nil policy")
 	}
 
-	// Optional mode doesn't need caching since it never fails
-	// But we allow it for consistency
-	if policy.VerificationMode == VerificationModeOptional {
-		// This is fine - we'll cache the result but it's mostly informational
-	}
+	// Optional mode doesn't need caching since it never fails, but we allow it for consistency
 
 	// Zero TTL would cause immediate expiration
 	if policy.CacheTTL <= 0 {

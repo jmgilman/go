@@ -76,7 +76,7 @@ func policyToCheckOpts(ctx context.Context, policy *Policy) (*cosign.CheckOpts, 
 
 // configureKeylessMode sets up CheckOpts for keyless (OIDC) verification.
 // This configures identity/issuer matching using Cosign's native matchers.
-func configureKeylessMode(ctx context.Context, checkOpts *cosign.CheckOpts, policy *Policy) error {
+func configureKeylessMode(_ context.Context, checkOpts *cosign.CheckOpts, policy *Policy) error {
 	// Configure identity matchers
 	// Cosign's Identities field expects a list of identity matchers
 	// Each identity can be an exact match or a regex pattern
@@ -192,7 +192,7 @@ func configureRekor(checkOpts *cosign.CheckOpts, policy *Policy) error {
 
 	// Validate Rekor URL uses HTTPS (security requirement preserved from rekor.go)
 	if !strings.HasPrefix(rekorURL, "https://") {
-		return fmt.Errorf("Rekor URL must use HTTPS: %s", rekorURL)
+		return fmt.Errorf("rekor URL must use HTTPS: %s", rekorURL)
 	}
 
 	// Parse the host from the URL (remove https:// prefix)

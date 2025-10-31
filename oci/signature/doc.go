@@ -33,12 +33,12 @@
 //	    return err
 //	}
 //
-//	// Create verifier
-//	verifier := signature.NewPublicKeyVerifier(pubKey)
+//	// Create signature verifier
+//	v := signature.NewPublicKeyVerifier(pubKey)
 //
 //	// Create client with verification
 //	client, err := ocibundle.NewWithOptions(
-//	    ocibundle.WithSignatureVerifier(verifier),
+//	    ocibundle.WithSignatureVerifier(v),
 //	)
 //
 //	// Pull will verify signature before extraction

@@ -278,7 +278,7 @@ func WithCacheTTL(ttl time.Duration) VerifierOption {
 // Note: Cache operations that fail do not cause verification to fail.
 // Caching is treated as a performance optimization, not a requirement.
 func WithCache(cache VerificationCache) VerifierOption {
-	return func(p *Policy) {
+	return func(_ *Policy) {
 		// Store cache in policy for now
 		// We'll need to refactor CosignVerifier to hold the cache separately
 		// For now, we'll add it to the verifier struct directly in the verifier.go

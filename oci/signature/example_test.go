@@ -96,12 +96,12 @@ func ExampleNewKeylessVerifier() {
 // ExampleWithAllowedIdentities demonstrates identity pattern matching.
 func ExampleWithAllowedIdentities() {
 	// Allow any email from example.com domain
-	verifier := signature.NewKeylessVerifier(
+	_ = signature.NewKeylessVerifier(
 		signature.WithAllowedIdentities("*@example.com"),
 	)
 
 	// Or allow specific users
-	verifier = signature.NewKeylessVerifier(
+	_ = signature.NewKeylessVerifier(
 		signature.WithAllowedIdentities(
 			"alice@example.com",
 			"bob@example.com",
@@ -109,7 +109,7 @@ func ExampleWithAllowedIdentities() {
 	)
 
 	// Or combine multiple domains
-	verifier = signature.NewKeylessVerifier(
+	verifier := signature.NewKeylessVerifier(
 		signature.WithAllowedIdentities(
 			"*@example.com",
 			"*@trusted.org",
@@ -281,13 +281,13 @@ func ExampleWithEnforceMode() {
 // ExampleWithRekor demonstrates transparency log integration.
 func ExampleWithRekor() {
 	// Enable Rekor for audit trail
-	verifier := signature.NewKeylessVerifier(
+	_ = signature.NewKeylessVerifier(
 		signature.WithAllowedIdentities("*@example.com"),
 		signature.WithRekor(true),
 	)
 
 	// Or use custom Rekor instance
-	verifier = signature.NewKeylessVerifier(
+	verifier := signature.NewKeylessVerifier(
 		signature.WithAllowedIdentities("*@example.com"),
 		signature.WithRekorURL("https://rekor.private.example.com"),
 	)

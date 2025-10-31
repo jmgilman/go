@@ -1,4 +1,4 @@
-// +build integration
+//go:build integration
 
 package signature_test
 
