@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -18,12 +19,19 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create sample files to bundle
 	if err := createSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
 	}
 
-	sourceDir := "./sample-files"
+	sourceDir := filepath.Join(cwd, "sample-files")
 
 	fmt.Println("🔐 Demonstrating different authentication methods...")
 

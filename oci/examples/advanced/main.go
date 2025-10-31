@@ -17,6 +17,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create sample files with various types
 	if err := createAdvancedSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
@@ -35,7 +42,7 @@ func main() {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	sourceDir := "./advanced-files"
+	sourceDir := filepath.Join(cwd, "advanced-files")
 	reference := "registry.example.com/my-app/bundle:v2.1.0"
 
 	// Advanced push with annotations, platform, and progress
@@ -70,7 +77,7 @@ func main() {
 	fmt.Println("\n✅ Bundle pushed with annotations and platform info!")
 
 	// Advanced pull with security constraints
-	targetDir := "./extracted-advanced"
+	targetDir := filepath.Join(cwd, "extracted-advanced")
 	fmt.Println("📥 Pulling bundle with security constraints...")
 
 	pullErr := client.Pull(ctx, reference, targetDir,
@@ -94,13 +101,13 @@ func main() {
 	fmt.Println("\n🛡️  Demonstrating error handling...")
 
 	// Try to pull non-existent reference
-	err = client.Pull(ctx, "registry.example.com/nonexistent:missing", "./error-test")
+	err = client.Pull(ctx, "registry.example.com/nonexistent:missing", filepath.Join(cwd, "error-test"))
 	if err != nil {
 		fmt.Printf("Expected error for non-existent reference: %v\n", err)
 	}
 
 	// Try to push to non-existent directory
-	err = client.Push(ctx, "./nonexistent-directory", reference)
+	err = client.Push(ctx, filepath.Join(cwd, "nonexistent-directory"), reference)
 	if err != nil {
 		fmt.Printf("Expected error for non-existent source directory: %v\n", err)
 	}

@@ -20,6 +20,13 @@ func main() {
 	fmt.Println("🚀 OCI Bundle Caching Example")
 	fmt.Println("================================")
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create some sample files to bundle
 	if err := createSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
@@ -35,7 +42,7 @@ func main() {
 	}
 
 	// Define the source directory and target reference
-	sourceDir := "./sample-files"
+	sourceDir := filepath.Join(cwd, "sample-files")
 	reference := "ghcr.io/your-org/cached-bundle:v1.0.0" // Replace with your registry
 
 	fmt.Printf("📤 Pushing bundle to registry: %s\n", reference)
@@ -45,7 +52,7 @@ func main() {
 	fmt.Println("✅ Bundle pushed successfully!")
 
 	// Pull the bundle to a new directory (first time - will cache)
-	targetDir1 := "./pulled-files-first"
+	targetDir1 := filepath.Join(cwd, "pulled-files-first")
 	fmt.Println("📥 First pull (will cache)...")
 	start := time.Now()
 	if err := client.PullWithCache(ctx, reference, targetDir1); err != nil {
@@ -55,7 +62,7 @@ func main() {
 	fmt.Printf("✅ First pull completed in %v\n", firstPullDuration)
 
 	// Pull the bundle again (should use cache)
-	targetDir2 := "./pulled-files-cached"
+	targetDir2 := filepath.Join(cwd, "pulled-files-cached")
 	fmt.Println("📥 Second pull (should use cache)...")
 	start = time.Now()
 	if err := client.PullWithCache(ctx, reference, targetDir2); err != nil {

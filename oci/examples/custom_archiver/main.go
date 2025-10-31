@@ -240,6 +240,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create sample files
 	if err := createSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
@@ -257,7 +264,7 @@ func main() {
 	fmt.Printf("Custom ZIP Archiver Media Type: %s\n", customArchiver.MediaType())
 
 	// Demonstrate archiving (without pushing to registry for this example)
-	sourceDir := "./sample-files"
+	sourceDir := filepath.Join(cwd, "sample-files")
 	tempFile, err := os.CreateTemp("", "custom-archiver-*.zip")
 	if err != nil {
 		log.Fatalf("Failed to create temp file: %v", err)
@@ -279,7 +286,7 @@ func main() {
 	fmt.Println("\n✅ Archive created successfully!")
 
 	// Demonstrate extraction
-	targetDir := "./extracted-zip"
+	targetDir := filepath.Join(cwd, "extracted-zip")
 	fmt.Println("📤 Extracting ZIP archive...")
 
 	// Reset file pointer for reading

@@ -20,6 +20,13 @@ func main() {
 	fmt.Println("🚀 Advanced OCI Bundle Caching Configuration Example")
 	fmt.Println("=====================================================")
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create some sample files to bundle
 	if err := createSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
@@ -29,12 +36,12 @@ func main() {
 	fmt.Println("\n📊 Example 1: Custom Cache Configuration")
 	fmt.Println("----------------------------------------")
 
-	cacheDir := "./cache-storage"
+	cacheDir := filepath.Join(cwd, "cache-storage")
 	cacheSize := int64(50 * 1024 * 1024) // 50MB cache limit
 	defaultTTL := 2 * time.Hour          // 2 hour TTL
 
 	client1, err := ocibundle.NewWithOptions(
-		ocibundle.WithCache("./cache-storage", cacheSize, defaultTTL),
+		ocibundle.WithCache(cacheDir, cacheSize, defaultTTL),
 		ocibundle.WithCachePolicy(ocibundle.CachePolicyEnabled),
 	)
 	if err != nil {
@@ -42,7 +49,7 @@ func main() {
 	}
 
 	reference1 := "ghcr.io/your-org/advanced-cache-bundle:v1.0.0"
-	sourceDir := "./sample-files"
+	sourceDir := filepath.Join(cwd, "sample-files")
 
 	fmt.Printf("📤 Pushing bundle with custom cache config (50MB limit, 2h TTL)\n")
 	if err := client1.Push(ctx, sourceDir, reference1); err != nil {
@@ -50,7 +57,7 @@ func main() {
 	}
 
 	// Pull with custom cache
-	targetDir1 := "./pulled-custom-cache"
+	targetDir1 := filepath.Join(cwd, "pulled-custom-cache")
 	fmt.Println("📥 Pulling with custom cache configuration...")
 	start := time.Now()
 	if err := client1.PullWithCache(ctx, reference1, targetDir1); err != nil {
@@ -76,7 +83,7 @@ func main() {
 		log.Fatalf("Failed to push bundle: %v", err)
 	}
 
-	targetDir2 := "./pulled-pull-only"
+	targetDir2 := filepath.Join(cwd, "pulled-pull-only")
 	fmt.Println("📥 Pulling with pull-only cache policy...")
 	start = time.Now()
 	if err := client2.PullWithCache(ctx, reference2, targetDir2); err != nil {
@@ -98,14 +105,14 @@ func main() {
 	reference3 := "ghcr.io/your-org/bypass-cache-bundle:v1.0.0"
 
 	// First pull - will cache
-	targetDir3a := "./pulled-bypass-a"
+	targetDir3a := filepath.Join(cwd, "pulled-bypass-a")
 	fmt.Println("📥 First pull (will populate cache)...")
 	if err := client3.PullWithCache(ctx, reference3, targetDir3a); err != nil {
 		log.Fatalf("Failed to pull bundle: %v", err)
 	}
 
 	// Second pull with bypass - will skip cache
-	targetDir3b := "./pulled-bypass-b"
+	targetDir3b := filepath.Join(cwd, "pulled-bypass-b")
 	fmt.Println("📥 Second pull with cache bypass...")
 	start = time.Now()
 	if err := client3.PullWithCache(ctx, reference3, targetDir3b,

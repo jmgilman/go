@@ -20,13 +20,20 @@ func main() {
 	fmt.Println("🚀 OCI Bundle Cache Management Example")
 	fmt.Println("======================================")
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create some sample files to bundle
 	if err := createSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
 	}
 
 	// Initialize the client with caching enabled
-	cacheDir := "./cache-management"
+	cacheDir := filepath.Join(cwd, "cache-management")
 	cacheSize := int64(100 * 1024 * 1024) // 100MB cache
 
 	client, err := ocibundle.NewWithOptions(
@@ -55,7 +62,7 @@ func main() {
 		{"large-bundle", "1MB"},
 	}
 
-	sourceDir := "./sample-files"
+	sourceDir := filepath.Join(cwd, "sample-files")
 
 	for i, bundle := range bundles {
 		reference := fmt.Sprintf("ghcr.io/your-org/cache-mgmt-%s:v1.0.%d", bundle.name, i)
@@ -66,7 +73,7 @@ func main() {
 		}
 
 		// Pull to populate cache
-		targetDir := fmt.Sprintf("./pulled-%s", bundle.name)
+		targetDir := filepath.Join(cwd, fmt.Sprintf("pulled-%s", bundle.name))
 		fmt.Printf("📥 Pulling %s to populate cache...\n", bundle.name)
 		if err := client.PullWithCache(ctx, reference, targetDir); err != nil {
 			log.Fatalf("Failed to pull %s: %v", bundle.name, err)
@@ -88,7 +95,7 @@ func main() {
 	reference := "ghcr.io/your-org/cache-mgmt-small-bundle:v1.0.0"
 
 	// First pull (from registry)
-	targetDir1 := "./performance-test-1"
+	targetDir1 := filepath.Join(cwd, "performance-test-1")
 	fmt.Println("🏃 First pull (from registry)...")
 	start := time.Now()
 	if err := client.PullWithCache(ctx, reference, targetDir1); err != nil {
@@ -98,7 +105,7 @@ func main() {
 	fmt.Printf("   Completed in: %v\n", registryPullTime)
 
 	// Second pull (from cache)
-	targetDir2 := "./performance-test-2"
+	targetDir2 := filepath.Join(cwd, "performance-test-2")
 	fmt.Println("🚀 Second pull (from cache)...")
 	start = time.Now()
 	if err := client.PullWithCache(ctx, reference, targetDir2); err != nil {

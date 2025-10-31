@@ -17,6 +17,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// Get current working directory for absolute paths
+	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v", err)
+	}
+
 	// Create sample files to bundle
 	if err := createSampleFiles(); err != nil {
 		log.Fatalf("Failed to create sample files: %v", err)
@@ -28,7 +35,7 @@ func main() {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	sourceDir := "./sample-files"
+	sourceDir := filepath.Join(cwd, "sample-files")
 	reference := "ghcr.io/your-org/sample-bundle:v1.0.0" // Replace with your registry
 
 	// Push with progress reporting
@@ -50,7 +57,7 @@ func main() {
 	fmt.Println("\n✅ Bundle pushed successfully!")
 
 	// Pull bundle
-	targetDir := "./pulled-files"
+	targetDir := filepath.Join(cwd, "pulled-files")
 	fmt.Println("📥 Pulling bundle...")
 
 	if err := client.Pull(ctx, reference, targetDir); err != nil {
