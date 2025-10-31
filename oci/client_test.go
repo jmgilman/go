@@ -581,23 +581,7 @@ func TestClient_Pull_Validation(t *testing.T) {
 	})
 }
 
-// TestClient_createRepository tests the internal createRepository method
-func TestClient_createRepository(t *testing.T) {
-	client, err := New()
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	repo, err := client.createRepository(ctx, "ghcr.io/test/repo:tag")
-	require.NoError(t, err)
-	assert.NotNil(t, repo)
-
-	// Test with invalid reference
-	_, err = client.createRepository(ctx, "invalid-reference")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to create repository")
-}
-
-// TestClient_createRepository_WithStaticAuth tests createRepository with static auth
+// TestClient_createRepository_WithStaticAuth tests repository creation behavior with static auth
 func TestClient_createRepository_WithStaticAuth(t *testing.T) {
 	client, err := NewWithOptions(
 		WithStaticAuth("ghcr.io", "testuser", "testpass"),

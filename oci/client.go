@@ -1,7 +1,6 @@
 package ocibundle
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,13 +28,58 @@ const (
 	footerSizeBytes = 100
 )
 
+// applyPushOptions applies functional options to default push options.
+func applyPushOptions(opts []PushOption) *PushOptions {
+	pushOpts := DefaultPushOptions()
+	for _, opt := range opts {
+		opt(pushOpts)
+	}
+	return pushOpts
+}
+
+// applyPullOptions applies functional options to default pull options.
+func applyPullOptions(opts []PullOption) *PullOptions {
+	pullOpts := DefaultPullOptions()
+	for _, opt := range opts {
+		opt(pullOpts)
+	}
+	return pullOpts
+}
+
+// validatePushInputs validates inputs for push operations.
+func validatePushInputs(fsys core.FS, sourceDir, reference string) error {
+	if sourceDir == "" {
+		return fmt.Errorf("source directory cannot be empty")
+	}
+	if reference == "" {
+		return fmt.Errorf("reference cannot be empty")
+	}
+	if exists, err := fsys.Exists(sourceDir); err != nil {
+		return fmt.Errorf("failed to check source directory: %w", err)
+	} else if !exists {
+		return fmt.Errorf("source directory does not exist: %s", sourceDir)
+	}
+	return nil
+}
+
 // validatePullInputs validates inputs for pull operations.
-func validatePullInputs(reference, targetDir string) error {
+func validatePullInputs(fsys core.FS, reference, targetDir string) error {
 	if reference == "" {
 		return fmt.Errorf("reference cannot be empty")
 	}
 	if targetDir == "" {
 		return fmt.Errorf("target directory cannot be empty")
+	}
+	if exists, err := fsys.Exists(targetDir); err != nil {
+		return fmt.Errorf("failed to check target directory: %w", err)
+	} else if exists {
+		entries, readErr := fsys.ReadDir(targetDir)
+		if readErr != nil {
+			return fmt.Errorf("failed to read target directory: %w", readErr)
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("target directory is not empty: %s", targetDir)
+		}
 	}
 	return nil
 }
@@ -165,9 +209,12 @@ func retryOperation(ctx context.Context, maxRetries int, delay time.Duration, op
 		}
 
 		if attempt > 0 {
-			// Exponential backoff: delay * 2^(attempt-1)
 			backoffDelay := delay * time.Duration(1<<(attempt-1))
-			time.Sleep(backoffDelay)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoffDelay):
+			}
 		}
 
 		err := operation()
@@ -177,7 +224,6 @@ func retryOperation(ctx context.Context, maxRetries int, delay time.Duration, op
 
 		lastErr = err
 
-		// Only retry on network-related errors
 		if !isRetryableError(err) {
 			break
 		}
@@ -188,23 +234,19 @@ func retryOperation(ctx context.Context, maxRetries int, delay time.Duration, op
 
 // isRetryableError determines if an error should trigger a retry
 func isRetryableError(err error) bool {
-	// Don't retry if context was canceled
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
 
-	// Retry on deadline exceeded
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 
-	// Check for network errors with Temporary() method
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Temporary() {
 		return true
 	}
 
-	// String matching as fallback for errors that don't expose proper types
 	errStr := err.Error()
 	return strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "connection reset") ||
@@ -220,35 +262,17 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Parse push options
-	pushOpts := DefaultPushOptions()
-	for _, opt := range opts {
-		opt(pushOpts)
+	pushOpts := applyPushOptions(opts)
+
+	if err := validatePushInputs(c.options.FS, sourceDir, reference); err != nil {
+		return err
 	}
 
-	// Validate inputs
-	if sourceDir == "" {
-		return fmt.Errorf("source directory cannot be empty")
-	}
-
-	if reference == "" {
-		return fmt.Errorf("reference cannot be empty")
-	}
-
-	// Check if source directory exists and is readable
-	if exists, exErr := c.options.FS.Exists(sourceDir); exErr != nil {
-		return fmt.Errorf("failed to check source directory: %w", exErr)
-	} else if !exists {
-		return fmt.Errorf("source directory does not exist: %s", sourceDir)
-	}
-
-	// Create authenticated repository (needed for future authentication validation)
 	_, repoErr := c.createRepository(ctx, reference)
 	if repoErr != nil {
 		return repoErr
 	}
 
-	// Create temporary directory and file for the archive within our filesystem
 	tempDir, tmpErr := c.createTempDir("ocibundle-push-")
 	if tmpErr != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
@@ -266,10 +290,8 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 		}
 	}()
 
-	// Create archiver
 	archiver := NewTarGzArchiverWithFS(c.options.FS)
 
-	// Archive the source directory (with progress if callback provided)
 	var archiveErr error
 	if pushOpts.ProgressCallback != nil {
 		archiveErr = archiver.ArchiveWithProgress(ctx, sourceDir, tempFile, pushOpts.ProgressCallback)
@@ -280,21 +302,17 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 		return fmt.Errorf("failed to archive directory: %w", archiveErr)
 	}
 
-	// Get file size
 	stat, statErr := tempFile.Stat()
 	if statErr != nil {
 		return fmt.Errorf("failed to get file size: %w", statErr)
 	}
 
-	// Push the artifact with retry logic
 	pushErr := retryOperation(ctx, pushOpts.MaxRetries, pushOpts.RetryDelay, func() error {
-		// Rewind before each attempt (if file supports seeking)
 		if seeker, ok := tempFile.(io.Seeker); ok {
 			if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
 				return fmt.Errorf("failed to seek temporary file: %w", seekErr)
 			}
 		}
-		// Recreate descriptor to ensure fresh reader for each attempt
 		desc := &orasint.PushDescriptor{
 			MediaType:   archiver.MediaType(),
 			Data:        tempFile,
@@ -308,7 +326,6 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 		return fmt.Errorf("failed to push artifact after %d retries: %w", pushOpts.MaxRetries, pushErr)
 	}
 
-	// Success - no cleanup needed
 	cleanupNeeded = false
 	return nil
 }
@@ -320,42 +337,17 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Parse pull options
-	pullOpts := DefaultPullOptions()
-	for _, opt := range opts {
-		opt(pullOpts)
+	pullOpts := applyPullOptions(opts)
+
+	if err := validatePullInputs(c.options.FS, reference, targetDir); err != nil {
+		return err
 	}
 
-	// Validate inputs
-	if reference == "" {
-		return fmt.Errorf("reference cannot be empty")
-	}
-
-	if targetDir == "" {
-		return fmt.Errorf("target directory cannot be empty")
-	}
-
-	// Check if target directory exists and is empty (for atomic extraction)
-	if exists, exErr := c.options.FS.Exists(targetDir); exErr != nil {
-		return fmt.Errorf("failed to check target directory: %w", exErr)
-	} else if exists {
-		// Directory exists, check if it's empty
-		entries, readErr := c.options.FS.ReadDir(targetDir)
-		if readErr != nil {
-			return fmt.Errorf("failed to read target directory: %w", readErr)
-		}
-		if len(entries) > 0 {
-			return fmt.Errorf("target directory is not empty: %s", targetDir)
-		}
-	}
-
-	// Create authenticated repository (needed for HTTP Range requests and authentication)
 	repo, repoErr := c.createRepository(ctx, reference)
 	if repoErr != nil {
 		return repoErr
 	}
 
-	// Pull the artifact with retry logic
 	var descriptor *orasint.PullDescriptor
 	pullErr := retryOperation(ctx, pullOpts.MaxRetries, pullOpts.RetryDelay, func() error {
 		var err error
@@ -369,10 +361,8 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 		return fmt.Errorf("failed to pull artifact after %d retries: %w", pullOpts.MaxRetries, pullErr)
 	}
 
-	// Ensure we close the descriptor data when done
 	defer descriptor.Data.Close()
 
-	// Create extract options from pull options
 	extractOpts := ExtractOptions{
 		MaxFiles:         pullOpts.MaxFiles,
 		MaxSize:          pullOpts.MaxSize,
@@ -383,47 +373,18 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 		FilesToExtract:   pullOpts.FilesToExtract,
 	}
 
-	// Decision tree for extraction strategy
 	if len(pullOpts.FilesToExtract) > 0 {
-		// Selective extraction requested - try HTTP Range for bandwidth optimization
-		var readerAt io.ReaderAt
-		var blobSize int64
-
-		// Try HTTP Range approach for bandwidth savings
-		blobURL, httpClient, urlErr := getBlobURLFromRepository(repo, descriptor.Digest)
-		if urlErr == nil && testBlobRangeSupport(ctx, httpClient, blobURL) {
-			// Registry supports Range requests - use HTTP Range seeker
-			// This downloads only the chunks needed for selected files
-			descriptor.Data.Close() // Close the full download stream
-
-			rangeSeeker := newHTTPRangeSeeker(httpClient, blobURL)
-			defer rangeSeeker.Close()
-
-			readerAt = newReaderAtFromSeeker(rangeSeeker, descriptor.Size)
-			blobSize = descriptor.Size
-		} else {
-			// Fallback: Read the full blob into memory
-			// This happens when:
-			// - Registry doesn't support HTTP Range requests
-			// - Unable to get blob URL or HTTP client
-			blobData, err := io.ReadAll(descriptor.Data)
-			if err != nil {
-				return fmt.Errorf("failed to read blob data: %w", err)
-			}
-
-			// Create a ReaderAt from the blob data
-			readerAt = bytes.NewReader(blobData)
-			blobSize = int64(len(blobData))
+		readerAt, blobSize, err := getBlobReaderAt(ctx, repo, descriptor.Digest, descriptor.Data, descriptor.Size)
+		if err != nil {
+			return err
 		}
 
-		// Try selective extraction with estargz
 		tempDir, tmpErr := c.createTempDir("ocibundle-selective-")
 		if tmpErr != nil {
 			return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
 		}
 		defer func() { _ = c.removeAllFS(tempDir) }()
 
-		// Extract selectively to temp directory
 		if err := extractSelectiveFromStargz(
 			ctx,
 			readerAt,
@@ -436,21 +397,16 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 			return fmt.Errorf("failed to extract selectively: %w", err)
 		}
 
-		// Ensure target directory exists
 		if err := c.options.FS.MkdirAll(targetDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create target directory: %w", err)
 		}
 
-		// Move extracted files to target directory
 		if err := c.moveFiles(tempDir, targetDir); err != nil {
-			// Clean up any partially moved files
 			_ = c.removeAllFS(targetDir)
 			return fmt.Errorf("failed to move extracted files: %w", err)
 		}
 
 	} else {
-		// Full extraction (no selective patterns)
-		// Use existing extraction logic
 		archiver := NewTarGzArchiverWithFS(c.options.FS)
 
 		if err := c.extractAtomically(ctx, archiver, descriptor.Data, targetDir, extractOpts); err != nil {
@@ -467,57 +423,36 @@ func (c *Client) PullWithCache(ctx context.Context, reference, targetDir string,
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	// Parse pull options
-	pullOpts := DefaultPullOptions()
-	for _, opt := range opts {
-		opt(pullOpts)
-	}
+	pullOpts := applyPullOptions(opts)
 
-	// Validate inputs
-	if err := validatePullInputs(reference, targetDir); err != nil {
+	if err := validatePullInputs(c.options.FS, reference, targetDir); err != nil {
 		return err
 	}
 
-	// Check if caching is enabled and should be used for this operation
 	cacheEnabled := c.isCachingEnabledForPull(pullOpts)
 
 	if !cacheEnabled {
-		// Fall back to regular pull if caching is disabled or bypassed
 		return c.Pull(ctx, reference, targetDir, opts...)
 	}
 
-	// Ensure cache is initialized
 	if err := c.ensureCacheInitialized(ctx); err != nil {
-		// Log warning but continue with regular pull
 		return c.Pull(ctx, reference, targetDir, opts...)
 	}
 
-	// Step 1: Resolve tag to digest (with caching)
 	digest, err := c.resolveTagWithCache(ctx, reference)
 	if err != nil {
-		// Failed to resolve - fall back to regular pull
-		// This shouldn't fail in normal operation, but gracefully degrade
 		return c.Pull(ctx, reference, targetDir, opts...)
 	}
 
-	// Step 2: Generate cache key from immutable digest
 	cacheKey := c.generateCacheKey(digest)
 
-	// Step 3: Try to get from cache first
 	if err := c.getFromCache(ctx, cacheKey, targetDir); err == nil {
-		// Successfully served from cache - no network access needed!
 		return nil
 	}
-	// Cache miss or error - proceed with network pull
 
-	// Step 4: Perform network pull (will cache blob during download in future)
-	// TODO: Implement blob caching during download using tee pattern (Phase 3)
 	if err := c.Pull(ctx, reference, targetDir, opts...); err != nil {
 		return err
 	}
-
-	// Note: Blob caching will be done during Pull() in Phase 3
-	// For now, blob is not cached (but tag→digest mapping is cached)
 
 	return nil
 }

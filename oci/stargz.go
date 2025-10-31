@@ -47,6 +47,33 @@ func testBlobRangeSupport(ctx context.Context, httpClient *http.Client, blobURL 
 	return resp.StatusCode == http.StatusPartialContent
 }
 
+// getBlobReaderAt attempts to create an io.ReaderAt for a blob, preferring HTTP Range requests
+// but falling back to reading the full blob into memory if necessary.
+// Returns the ReaderAt and size, or an error if both approaches fail.
+func getBlobReaderAt(
+	ctx context.Context,
+	repo *remote.Repository,
+	digest string,
+	descriptorData io.ReadCloser,
+	descriptorSize int64,
+) (io.ReaderAt, int64, error) {
+	blobURL, httpClient, urlErr := getBlobURLFromRepository(repo, digest)
+	if urlErr == nil && testBlobRangeSupport(ctx, httpClient, blobURL) {
+		// Registry supports Range requests - use HTTP Range seeker
+		descriptorData.Close() // Close the full download stream
+		rangeSeeker := newHTTPRangeSeeker(httpClient, blobURL)
+		return newReaderAtFromSeeker(rangeSeeker, descriptorSize), descriptorSize, nil
+	}
+
+	// Fallback: Read full blob into memory
+	blobData, err := io.ReadAll(descriptorData)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read blob data: %w", err)
+	}
+
+	return bytes.NewReader(blobData), int64(len(blobData)), nil
+}
+
 // newHTTPRangeSeeker creates an HTTP Range request seeker for a blob URL.
 func newHTTPRangeSeeker(httpClient *http.Client, blobURL string) io.ReadSeekCloser {
 	return transport.NewHTTPReadSeeker(httpClient, blobURL, nil)

@@ -375,9 +375,9 @@ func (c *Client) ListFilesWithFilter(ctx context.Context, reference string, patt
 	}
 
 	for _, file := range allFiles.Files {
-		// Always include directories
+		// Skip directories - only filter regular files
 		if file.IsDir {
-			continue // We'll count dirs separately
+			continue
 		}
 
 		// Check if file matches any pattern
