@@ -112,7 +112,7 @@ func (a *TarGzArchiver) ArchiveWithProgress(
 	if err != nil {
 		return fmt.Errorf("failed to build estargz archive: %w", err)
 	}
-	defer estargzBlob.Close()
+	defer func() { _ = estargzBlob.Close() }()
 
 	// Step 3: Copy the eStargz blob to the output
 	// Note: Progress tracking for the estargz compression phase would be complex
@@ -279,7 +279,7 @@ func (a *TarGzArchiver) Extract(ctx context.Context, input io.Reader, targetDir 
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzipReader.Close()
+	defer func() { _ = gzipReader.Close() }()
 
 	tarReader := tar.NewReader(gzipReader)
 

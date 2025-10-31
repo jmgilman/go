@@ -95,7 +95,7 @@ type ExtractOptions struct {
 // - MaxSize: 1GB (prevents resource exhaustion)
 // - MaxFileSize: 100MB (prevents large individual files)
 // - PreservePerms: false (sanitizes permissions)
-// - FilesToExtract: empty (extracts all files)
+// - FilesToExtract: empty (extracts all files).
 var DefaultExtractOptions = ExtractOptions{
 	MaxFiles:         10000,
 	MaxSize:          1 * 1024 * 1024 * 1024, // 1GB

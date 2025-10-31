@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTarGzArchiver_BasicArchive tests basic archive creation functionality
+// TestTarGzArchiver_BasicArchive tests basic archive creation functionality.
 func TestTarGzArchiver_BasicArchive(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -37,7 +38,7 @@ func TestTarGzArchiver_BasicArchive(t *testing.T) {
 	assert.Greater(t, buf.Len(), 0, "Archive should contain data")
 }
 
-// TestTarGzArchiver_BasicExtract tests basic extraction functionality
+// TestTarGzArchiver_BasicExtract tests basic extraction functionality.
 func TestTarGzArchiver_BasicExtract(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -113,7 +114,7 @@ func TestTarGzArchiver_DebugRoundTrip(t *testing.T) {
 	assert.Greater(t, archive2.Len(), 0, "Second archive should contain data")
 }
 
-// TestTarGzArchiver_RoundTrip tests archive -> extract -> archive consistency
+// TestTarGzArchiver_RoundTrip tests archive -> extract -> archive consistency.
 func TestTarGzArchiver_RoundTrip(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -200,14 +201,14 @@ func TestTarGzArchiver_RoundTrip(t *testing.T) {
 	t.Logf("Round-trip successful: original=%d bytes, roundtrip=%d bytes", originalSize, archive2.Len())
 }
 
-// TestTarGzArchiver_MediaType tests the media type method
+// TestTarGzArchiver_MediaType tests the media type method.
 func TestTarGzArchiver_MediaType(t *testing.T) {
 	archiver := NewTarGzArchiver()
 	expected := "application/vnd.oci.image.layer.v1.tar+gzip"
 	assert.Equal(t, expected, archiver.MediaType())
 }
 
-// TestTarGzArchiver_WithSecurityValidators tests integration with security validators
+// TestTarGzArchiver_WithSecurityValidators tests integration with security validators.
 func TestTarGzArchiver_WithSecurityValidators(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -263,7 +264,7 @@ func createMaliciousArchive(t *testing.T, output io.Writer) {
 	require.NoError(t, err)
 }
 
-// TestTarGzArchiver_LargeFile tests handling of large files
+// TestTarGzArchiver_LargeFile tests handling of large files.
 func TestTarGzArchiver_LargeFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping large file test in short mode")
@@ -302,7 +303,7 @@ func TestTarGzArchiver_LargeFile(t *testing.T) {
 	assert.Equal(t, largeData, extractedData, "Large file content should match")
 }
 
-// TestTarGzArchiver_EmptyDirectory tests archiving empty directories
+// TestTarGzArchiver_EmptyDirectory tests archiving empty directories.
 func TestTarGzArchiver_EmptyDirectory(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -329,7 +330,7 @@ func TestTarGzArchiver_EmptyDirectory(t *testing.T) {
 	assert.DirExists(t, filepath.Join(targetDir, "empty2"))
 }
 
-// TestTarGzArchiver_ErrorHandling tests various error conditions
+// TestTarGzArchiver_ErrorHandling tests various error conditions.
 func TestTarGzArchiver_ErrorHandling(t *testing.T) {
 	archiver := NewTarGzArchiver()
 
@@ -363,7 +364,7 @@ func TestTarGzArchiver_ErrorHandling(t *testing.T) {
 	assert.NoError(t, err, "Target directory should be created")
 }
 
-// TestTarGzArchiver_Compatibility tests that created archives are valid tar.gz format
+// TestTarGzArchiver_Compatibility tests that created archives are valid tar.gz format.
 func TestTarGzArchiver_Compatibility(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping compatibility test in short mode")
@@ -433,7 +434,7 @@ func TestTarGzArchiver_Compatibility(t *testing.T) {
 	t.Log("Archive format validated as proper tar.gz")
 }
 
-// TestTarGzArchiver_SecurityLimits tests security limit enforcement
+// TestTarGzArchiver_SecurityLimits tests security limit enforcement.
 func TestTarGzArchiver_SecurityLimits(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -467,7 +468,7 @@ func TestTarGzArchiver_SecurityLimits(t *testing.T) {
 	assert.Contains(t, err.Error(), "security", "Error should be security-related")
 }
 
-// TestTarGzArchiver_MemFS_RoundTrip tests archive/extract using an in-memory filesystem
+// TestTarGzArchiver_MemFS_RoundTrip tests archive/extract using an in-memory filesystem.
 func TestTarGzArchiver_MemFS_RoundTrip(t *testing.T) {
 	tempFS := billy.NewMemory()
 
@@ -495,7 +496,7 @@ func TestTarGzArchiver_MemFS_RoundTrip(t *testing.T) {
 }
 
 // TestTarGzArchiver_EstargzFormat verifies that archives are created in eStargz format
-// with the expected metadata files (TOC and landmark)
+// with the expected metadata files (TOC and landmark).
 func TestTarGzArchiver_EstargzFormat(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -516,7 +517,7 @@ func TestTarGzArchiver_EstargzFormat(t *testing.T) {
 	// Verify archive contains eStargz metadata files
 	gzReader, err := gzip.NewReader(&buf)
 	require.NoError(t, err)
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	tarReader := tar.NewReader(gzReader)
 
@@ -561,7 +562,7 @@ func TestTarGzArchiver_EstargzFormat(t *testing.T) {
 	t.Log("✓ Archive is in eStargz format with TOC")
 }
 
-// TestMatchesPattern tests the glob pattern matching functionality
+// TestMatchesPattern tests the glob pattern matching functionality.
 func TestMatchesPattern(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -607,7 +608,7 @@ func TestMatchesPattern(t *testing.T) {
 	}
 }
 
-// TestMatchesAnyPattern tests matching against multiple patterns
+// TestMatchesAnyPattern tests matching against multiple patterns.
 func TestMatchesAnyPattern(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -669,7 +670,7 @@ func TestMatchesAnyPattern(t *testing.T) {
 	}
 }
 
-// TestSelectiveExtraction tests extracting only files matching patterns
+// TestSelectiveExtraction tests extracting only files matching patterns.
 func TestSelectiveExtraction(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
@@ -744,7 +745,7 @@ func TestSelectiveExtraction(t *testing.T) {
 }
 
 // TestTarGzArchiver_BackwardCompatibility tests that plain tar.gz archives
-// (created without eStargz) can still be extracted
+// (created without eStargz) can still be extracted.
 func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 	// Create a plain tar.gz archive (not eStargz) manually
 	sourceDir := t.TempDir()
@@ -765,7 +766,7 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "plain.tar.gz")
 	archiveFile, err := os.Create(archivePath)
 	require.NoError(t, err)
-	defer archiveFile.Close()
+	defer func() { _ = archiveFile.Close() }()
 
 	gzWriter := gzip.NewWriter(archiveFile)
 	tarWriter := tar.NewWriter(gzWriter)
@@ -781,13 +782,13 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 
 		relPath, err := filepath.Rel(sourceDir, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get relative path: %w", err)
 		}
 
 		// Read file content
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to read file %s: %w", path, err)
 		}
 
 		// Create tar header
@@ -798,10 +799,10 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 		}
 
 		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
+			return fmt.Errorf("failed to write tar header: %w", err)
 		}
 		if _, err := tarWriter.Write(content); err != nil {
-			return err
+			return fmt.Errorf("failed to write tar content: %w", err)
 		}
 
 		return nil
@@ -810,7 +811,7 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 
 	require.NoError(t, tarWriter.Close())
 	require.NoError(t, gzWriter.Close())
-	archiveFile.Close()
+	require.NoError(t, archiveFile.Close())
 
 	// Test 1: Extract plain tar.gz with full extraction
 	t.Run("full extraction from plain tar.gz", func(t *testing.T) {
@@ -819,7 +820,7 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 
 		archiveReader, err := os.Open(archivePath)
 		require.NoError(t, err)
-		defer archiveReader.Close()
+		defer func() { _ = archiveReader.Close() }()
 
 		err = archiver.Extract(context.Background(), archiveReader, targetDir, DefaultExtractOptions)
 		assert.NoError(t, err, "Should extract plain tar.gz successfully")
@@ -841,7 +842,7 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 
 		archiveReader, err := os.Open(archivePath)
 		require.NoError(t, err)
-		defer archiveReader.Close()
+		defer func() { _ = archiveReader.Close() }()
 
 		opts := DefaultExtractOptions
 		opts.FilesToExtract = []string{"**/*.json"}
@@ -859,7 +860,7 @@ func TestTarGzArchiver_BackwardCompatibility(t *testing.T) {
 }
 
 // TestSelectiveExtraction_SecurityValidation tests that security validators
-// are still enforced during selective extraction
+// are still enforced during selective extraction.
 func TestSelectiveExtraction_SecurityValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -933,7 +934,7 @@ func TestSelectiveExtraction_SecurityValidation(t *testing.T) {
 
 			archiveFile, err := os.Create(archivePath)
 			require.NoError(t, err)
-			defer archiveFile.Close()
+			defer func() { _ = archiveFile.Close() }()
 
 			err = archiver.Archive(context.Background(), sourceDir, archiveFile)
 			require.NoError(t, err)
@@ -944,7 +945,7 @@ func TestSelectiveExtraction_SecurityValidation(t *testing.T) {
 
 			archiveReader, err := os.Open(archivePath)
 			require.NoError(t, err)
-			defer archiveReader.Close()
+			defer func() { _ = archiveReader.Close() }()
 
 			err = archiver.Extract(context.Background(), archiveReader, targetDir, tt.opts)
 
@@ -955,32 +956,35 @@ func TestSelectiveExtraction_SecurityValidation(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err, "Should succeed with safe files")
-
-				// Verify only matching files were extracted
-				for path := range tt.files {
-					fullPath := filepath.Join(targetDir, path)
-					matched := false
-					for _, pattern := range tt.patterns {
-						if match, _ := filepath.Match(pattern, path); match {
-							matched = true
-							break
-						}
-						// Check recursive patterns
-						if strings.Contains(pattern, "**") {
-							if matchesPattern(path, pattern) {
-								matched = true
-								break
-							}
-						}
-					}
-
-					if matched {
-						assert.FileExists(t, fullPath, "Matched file should exist")
-					} else {
-						assert.NoFileExists(t, fullPath, "Unmatched file should not exist")
-					}
-				}
+				verifyExtractedFiles(t, targetDir, tt.files, tt.patterns)
 			}
 		})
+	}
+}
+
+// verifyExtractedFiles checks that only files matching the patterns were extracted.
+func verifyExtractedFiles(t *testing.T, targetDir string, files map[string]string, patterns []string) {
+	for path := range files {
+		fullPath := filepath.Join(targetDir, path)
+		matched := false
+		for _, pattern := range patterns {
+			if match, _ := filepath.Match(pattern, path); match {
+				matched = true
+				break
+			}
+			// Check recursive patterns
+			if strings.Contains(pattern, "**") {
+				if matchesPattern(path, pattern) {
+					matched = true
+					break
+				}
+			}
+		}
+
+		if matched {
+			assert.FileExists(t, fullPath, "Matched file should exist")
+		} else {
+			assert.NoFileExists(t, fullPath, "Unmatched file should not exist")
+		}
 	}
 }

@@ -6,6 +6,7 @@ package ocibundle
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,7 +42,7 @@ func testBlobRangeSupport(ctx context.Context, httpClient *http.Client, blobURL 
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check for 206 Partial Content response
 	return resp.StatusCode == http.StatusPartialContent
@@ -60,7 +61,7 @@ func getBlobReaderAt(
 	blobURL, httpClient, urlErr := getBlobURLFromRepository(repo, digest)
 	if urlErr == nil && testBlobRangeSupport(ctx, httpClient, blobURL) {
 		// Registry supports Range requests - use HTTP Range seeker
-		descriptorData.Close() // Close the full download stream
+		_ = descriptorData.Close() // Close the full download stream
 		rangeSeeker := newHTTPRangeSeeker(httpClient, blobURL)
 		return newReaderAtFromSeeker(rangeSeeker, descriptorSize), descriptorSize, nil
 	}
@@ -165,7 +166,7 @@ func extractTOCFromBlob(
 	}
 
 	footerSeeker := newHTTPRangeSeeker(httpClient, blobURL)
-	defer footerSeeker.Close()
+	defer func() { _ = footerSeeker.Close() }()
 
 	// Seek to the position where footer starts (last 100 bytes)
 	footerStart := blobSize - footerSize
@@ -177,7 +178,7 @@ func extractTOCFromBlob(
 	// Read the footer bytes
 	footerBytes := make([]byte, footerSize)
 	n, err := io.ReadFull(footerSeeker, footerBytes)
-	if err != nil && err != io.ErrUnexpectedEOF {
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, fmt.Errorf("failed to read footer: %w", err)
 	}
 	footerBytes = footerBytes[:n] // Trim to actual bytes read
@@ -204,7 +205,7 @@ func extractTOCFromBlob(
 
 	// Download TOC using Range request
 	tocSeeker := newHTTPRangeSeeker(httpClient, blobURL)
-	defer tocSeeker.Close()
+	defer func() { _ = tocSeeker.Close() }()
 
 	_, err = tocSeeker.Seek(tocStart, io.SeekStart)
 	if err != nil {
@@ -360,7 +361,11 @@ func (r *readerAtFromSeeker) ReadAt(p []byte, offset int64) (int, error) {
 		return 0, fmt.Errorf("seek to offset %d failed: %w", offset, err)
 	}
 
-	return io.ReadFull(r.seeker, p)
+	n, err := io.ReadFull(r.seeker, p)
+	if err != nil {
+		return n, fmt.Errorf("failed to read full data: %w", err)
+	}
+	return n, nil
 }
 
 // Size returns the total size of the content.
@@ -380,39 +385,15 @@ func (r *readerAtFromSeeker) Size() int64 {
 //   - opts: Extraction options including security validators
 //   - fsys: Filesystem to write to
 //
-// Returns error if extraction fails.
-func extractSelectiveFromStargz(
-	ctx context.Context,
-	readerAt io.ReaderAt,
-	size int64,
-	targetDir string,
-	patterns []string,
-	opts ExtractOptions,
-	fsys core.FS,
-) error {
-	// Create a SectionReader from the ReaderAt (required by estargz)
-	sectionReader := io.NewSectionReader(readerAt, 0, size)
-
-	// Open the estargz archive
-	stargzReader, err := estargz.Open(sectionReader)
-	if err != nil {
-		return fmt.Errorf("failed to open estargz archive: %w", err)
-	}
-
-	// Create validators
-	validators := newDefaultValidatorChain(opts)
-
-	// Track statistics
-	var totalSize int64
-	var fileCount int
-
-	// Collect all matching files first (estargz stores entries with full paths)
+// collectStargzEntries collects all entries from a stargz TOC that match the given patterns.
+// Returns a slice of entry names to extract.
+func collectStargzEntries(ctx context.Context, stargzReader *estargz.Reader, patterns []string) ([]string, error) {
 	var filesToExtract []string
 
 	// Get root entry to walk the TOC
 	rootEntry, ok := stargzReader.Lookup("")
 	if !ok {
-		return fmt.Errorf("failed to lookup root entry in stargz TOC")
+		return nil, fmt.Errorf("failed to lookup root entry in stargz TOC")
 	}
 
 	// Walk all entries in the TOC
@@ -466,36 +447,127 @@ func extractSelectiveFromStargz(
 
 	// Collect all entries
 	if err := collectEntries(rootEntry); err != nil {
+		return nil, err
+	}
+
+	return filesToExtract, nil
+}
+
+// extractStargzEntry extracts a single entry from the stargz archive.
+func extractStargzEntry(ctx context.Context, stargzReader *estargz.Reader, entryName string, targetDir string, validators *ValidatorChain, fsys core.FS) error {
+	if err := isDone(ctx, "extraction"); err != nil {
 		return err
 	}
 
-	// Now extract the collected files
-	for _, entryName := range filesToExtract {
-		if err := isDone(ctx, "extraction"); err != nil {
-			return err
+	// Lookup the entry
+	entry, ok := stargzReader.Lookup(entryName)
+	if !ok {
+		return nil // Entry not found, skip
+	}
+
+	// Validate against security constraints
+	fileInfo := FileInfo{
+		Name: entryName,
+		Size: entry.Size,
+		Mode: uint32(entry.Mode),
+	}
+
+	if err := validators.ValidateFile(fileInfo); err != nil {
+		return fmt.Errorf("validation failed for %s: %w", entryName, err)
+	}
+
+	// Create target path
+	targetPath := filepath.Join(targetDir, entryName)
+
+	// Handle based on entry type
+	switch entry.Type {
+	case "dir":
+		// Create directory
+		if err := fsys.MkdirAll(targetPath, 0o755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
 		}
 
-		// Lookup the entry
+	case "reg":
+		// Extract regular file
+		if err := fsys.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return fmt.Errorf("failed to create parent directory for %s: %w", targetPath, err)
+		}
+
+		// Open the file from stargz (uses Range requests)
+		sr, err := stargzReader.OpenFile(entryName)
+		if err != nil {
+			return fmt.Errorf("failed to open file %s from stargz: %w", entryName, err)
+		}
+
+		// Create target file
+		targetFile, err := fsys.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+		}
+		defer func() { _ = targetFile.Close() }()
+
+		// Copy content (Range requests happen here)
+		if _, err := io.Copy(targetFile, sr); err != nil {
+			return fmt.Errorf("failed to write file %s: %w", targetPath, err)
+		}
+
+	case "symlink":
+		// Handle symlinks if filesystem supports them
+		if sfs, ok := fsys.(core.SymlinkFS); ok {
+			if err := sfs.Symlink(entry.LinkName, targetPath); err != nil {
+				return fmt.Errorf("failed to create symlink %s: %w", targetPath, err)
+			}
+		}
+		// If symlinks not supported, skip silently
+	}
+
+	return nil
+}
+
+// Returns error if extraction fails.
+func extractSelectiveFromStargz(
+	ctx context.Context,
+	readerAt io.ReaderAt,
+	size int64,
+	targetDir string,
+	patterns []string,
+	opts ExtractOptions,
+	fsys core.FS,
+) error {
+	// Create a SectionReader from the ReaderAt (required by estargz)
+	sectionReader := io.NewSectionReader(readerAt, 0, size)
+
+	// Open the estargz archive
+	stargzReader, err := estargz.Open(sectionReader)
+	if err != nil {
+		return fmt.Errorf("failed to open estargz archive: %w", err)
+	}
+
+	// Create validators
+	validators := newDefaultValidatorChain(opts)
+
+	// Collect all matching files first
+	filesToExtract, err := collectStargzEntries(ctx, stargzReader, patterns)
+	if err != nil {
+		return fmt.Errorf("failed to collect stargz entries: %w", err)
+	}
+
+	// Track statistics for validation
+	var totalSize int64
+	var fileCount int
+
+	// Now extract the collected files
+	for _, entryName := range filesToExtract {
+		// Get entry for size calculation
 		entry, ok := stargzReader.Lookup(entryName)
 		if !ok {
 			continue // Entry not found, skip
 		}
 
-		// Increment file count
 		fileCount++
-
-		// Validate against security constraints
-		fileInfo := FileInfo{
-			Name: entryName,
-			Size: entry.Size,
-			Mode: uint32(entry.Mode),
-		}
-
-		if err := validators.ValidateFile(fileInfo); err != nil {
-			return fmt.Errorf("validation failed for %s: %w", entryName, err)
-		}
-
 		totalSize += entry.Size
+
+		// Validate archive stats after each file to catch limits early
 		archiveStats := ArchiveStats{
 			TotalFiles: fileCount,
 			TotalSize:  totalSize,
@@ -504,49 +576,9 @@ func extractSelectiveFromStargz(
 			return fmt.Errorf("archive validation failed: %w", err)
 		}
 
-		// Create target path
-		targetPath := filepath.Join(targetDir, entryName)
-
-		// Handle based on entry type
-		switch entry.Type {
-		case "dir":
-			// Create directory
-			if err := fsys.MkdirAll(targetPath, 0o755); err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
-			}
-
-		case "reg":
-			// Extract regular file
-			if err := fsys.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return fmt.Errorf("failed to create parent directory for %s: %w", targetPath, err)
-			}
-
-			// Open the file from stargz (uses Range requests)
-			sr, err := stargzReader.OpenFile(entryName)
-			if err != nil {
-				return fmt.Errorf("failed to open file %s from stargz: %w", entryName, err)
-			}
-
-			// Create target file
-			targetFile, err := fsys.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-			if err != nil {
-				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
-			}
-			defer targetFile.Close()
-
-			// Copy content (Range requests happen here)
-			if _, err := io.Copy(targetFile, sr); err != nil {
-				return fmt.Errorf("failed to write file %s: %w", targetPath, err)
-			}
-
-		case "symlink":
-			// Handle symlinks if filesystem supports them
-			if sfs, ok := fsys.(core.SymlinkFS); ok {
-				if err := sfs.Symlink(entry.LinkName, targetPath); err != nil {
-					return fmt.Errorf("failed to create symlink %s: %w", targetPath, err)
-				}
-			}
-			// If symlinks not supported, skip silently
+		// Extract the individual entry
+		if err := extractStargzEntry(ctx, stargzReader, entryName, targetDir, validators, fsys); err != nil {
+			return fmt.Errorf("failed to extract entry %s: %w", entryName, err)
 		}
 	}
 

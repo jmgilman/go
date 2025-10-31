@@ -3,6 +3,7 @@ package ocibundle
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestBuildBlobURL tests blob URL construction
+// TestBuildBlobURL tests blob URL construction.
 func TestBuildBlobURL(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -67,7 +68,7 @@ func TestBuildBlobURL(t *testing.T) {
 	}
 }
 
-// TestTestBlobRangeSupport tests Range request detection
+// TestTestBlobRangeSupport tests Range request detection.
 func TestTestBlobRangeSupport(t *testing.T) {
 	t.Run("supports range requests", func(t *testing.T) {
 		// Create a test server that supports Range requests
@@ -76,10 +77,10 @@ func TestTestBlobRangeSupport(t *testing.T) {
 			if rangeHeader != "" {
 				w.Header().Set("Content-Range", "bytes 0-0/100")
 				w.WriteHeader(http.StatusPartialContent)
-				w.Write([]byte("A"))
+				w.Write([]byte("A")) //nolint:errcheck
 			} else {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("full content"))
+				w.Write([]byte("full content")) //nolint:errcheck
 			}
 		}))
 		defer server.Close()
@@ -91,10 +92,10 @@ func TestTestBlobRangeSupport(t *testing.T) {
 
 	t.Run("does not support range requests", func(t *testing.T) {
 		// Create a test server that doesn't support Range requests
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			// Ignore Range header and return 200 OK with full content
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("full content"))
+			w.Write([]byte("full content")) //nolint:errcheck
 		}))
 		defer server.Close()
 
@@ -111,7 +112,7 @@ func TestTestBlobRangeSupport(t *testing.T) {
 
 	t.Run("context cancellation", func(t *testing.T) {
 		// Create a server that delays response
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			time.Sleep(300 * time.Millisecond) // Just enough to trigger timeout
 			w.WriteHeader(http.StatusPartialContent)
 		}))
@@ -129,7 +130,7 @@ func TestTestBlobRangeSupport(t *testing.T) {
 	})
 }
 
-// TestReaderAtFromSeeker tests the ReaderAt adapter
+// TestReaderAtFromSeeker tests the ReaderAt adapter.
 func TestReaderAtFromSeeker(t *testing.T) {
 	t.Run("basic read at", func(t *testing.T) {
 		// Create a simple in-memory seeker
@@ -211,11 +212,11 @@ func TestReaderAtFromSeeker(t *testing.T) {
 		buf := make([]byte, 10)
 		_, err := adapter.ReadAt(buf, 0)
 		assert.Error(t, err, "Reading beyond end should error")
-		assert.Equal(t, io.ErrUnexpectedEOF, err)
+		assert.True(t, errors.Is(err, io.ErrUnexpectedEOF), "Error should be ErrUnexpectedEOF")
 	})
 }
 
-// TestTOCOnlyReaderAt tests the virtual ReaderAt for TOC and footer
+// TestTOCOnlyReaderAt tests the virtual ReaderAt for TOC and footer.
 func TestTOCOnlyReaderAt(t *testing.T) {
 	// Create sample TOC and footer data
 	tocData := []byte("This is the TOC data")
@@ -269,8 +270,8 @@ func TestTOCOnlyReaderAt(t *testing.T) {
 	})
 }
 
-// TestGetBlobURLFromRepository tests blob URL extraction from repository
-// Note: This is a basic test; full integration tests are in tests/stargz_range_test.go
+// TestGetBlobURLFromRepository tests blob URL extraction from repository.
+// Note: This is a basic test; full integration tests are in tests/stargz_range_test.go.
 func TestGetBlobURLFromRepository(t *testing.T) {
 	t.Run("basic functionality placeholder", func(t *testing.T) {
 		// This function requires a real *remote.Repository which is complex to mock

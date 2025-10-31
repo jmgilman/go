@@ -581,7 +581,7 @@ func TestClient_Pull_Validation(t *testing.T) {
 	})
 }
 
-// TestClient_createRepository_WithStaticAuth tests repository creation behavior with static auth
+// TestClient_createRepository_WithStaticAuth tests repository creation behavior with static auth.
 func TestClient_createRepository_WithStaticAuth(t *testing.T) {
 	client, err := NewWithOptions(
 		WithStaticAuth("ghcr.io", "testuser", "testpass"),

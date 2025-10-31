@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,7 +211,7 @@ func retryOperation(ctx context.Context, maxRetries int, delay time.Duration, op
 			backoffDelay := delay * time.Duration(1<<(attempt-1))
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
 			case <-time.After(backoffDelay):
 			}
 		}
@@ -242,10 +241,8 @@ func isRetryableError(err error) bool {
 		return true
 	}
 
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Temporary() {
-		return true
-	}
+	// Check for other retryable network errors by examining the error string
+	// (netErr.Temporary() is deprecated since Go 1.18)
 
 	errStr := err.Error()
 	return strings.Contains(errStr, "connection refused") ||
@@ -374,44 +371,48 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 	}
 
 	if len(pullOpts.FilesToExtract) > 0 {
-		readerAt, blobSize, err := getBlobReaderAt(ctx, repo, descriptor.Digest, descriptor.Data, descriptor.Size)
-		if err != nil {
-			return err
-		}
+		return c.extractSelective(ctx, repo, descriptor, targetDir, pullOpts, extractOpts)
+	}
 
-		tempDir, tmpErr := c.createTempDir("ocibundle-selective-")
-		if tmpErr != nil {
-			return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
-		}
-		defer func() { _ = c.removeAllFS(tempDir) }()
+	archiver := NewTarGzArchiverWithFS(c.options.FS)
+	if err := c.extractAtomically(ctx, archiver, descriptor.Data, targetDir, extractOpts); err != nil {
+		return fmt.Errorf("failed to extract archive: %w", err)
+	}
+	return nil
+}
 
-		if err := extractSelectiveFromStargz(
-			ctx,
-			readerAt,
-			blobSize,
-			tempDir,
-			pullOpts.FilesToExtract,
-			extractOpts,
-			c.options.FS,
-		); err != nil {
-			return fmt.Errorf("failed to extract selectively: %w", err)
-		}
+// extractSelective handles selective file extraction from OCI artifacts.
+func (c *Client) extractSelective(ctx context.Context, repo *remote.Repository, descriptor *orasint.PullDescriptor, targetDir string, pullOpts *PullOptions, extractOpts ExtractOptions) error {
+	readerAt, blobSize, err := getBlobReaderAt(ctx, repo, descriptor.Digest, descriptor.Data, descriptor.Size)
+	if err != nil {
+		return err
+	}
 
-		if err := c.options.FS.MkdirAll(targetDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create target directory: %w", err)
-		}
+	tempDir, tmpErr := c.createTempDir("ocibundle-selective-")
+	if tmpErr != nil {
+		return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
+	}
+	defer func() { _ = c.removeAllFS(tempDir) }()
 
-		if err := c.moveFiles(tempDir, targetDir); err != nil {
-			_ = c.removeAllFS(targetDir)
-			return fmt.Errorf("failed to move extracted files: %w", err)
-		}
+	if err := extractSelectiveFromStargz(
+		ctx,
+		readerAt,
+		blobSize,
+		tempDir,
+		pullOpts.FilesToExtract,
+		extractOpts,
+		c.options.FS,
+	); err != nil {
+		return fmt.Errorf("failed to extract selectively: %w", err)
+	}
 
-	} else {
-		archiver := NewTarGzArchiverWithFS(c.options.FS)
+	if err := c.options.FS.MkdirAll(targetDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create target directory: %w", err)
+	}
 
-		if err := c.extractAtomically(ctx, archiver, descriptor.Data, targetDir, extractOpts); err != nil {
-			return fmt.Errorf("failed to extract archive: %w", err)
-		}
+	if err := c.moveFiles(tempDir, targetDir); err != nil {
+		_ = c.removeAllFS(targetDir)
+		return fmt.Errorf("failed to move extracted files: %w", err)
 	}
 
 	return nil
@@ -539,10 +540,7 @@ func (c *Client) resolveTagWithCache(ctx context.Context, reference string) (str
 	}
 
 	// Cache the tag→digest mapping for future use
-	if cacheErr := coordinator.PutTagMapping(ctx, reference, digest); cacheErr != nil {
-		// Don't fail if caching fails - resolution succeeded
-		// Just log the error (in production, would use proper logging)
-	}
+	_ = coordinator.PutTagMapping(ctx, reference, digest) // Ignore caching errors - resolution succeeded
 
 	return digest, nil
 }
@@ -555,7 +553,7 @@ func (c *Client) resolveTagDirect(ctx context.Context, reference string) (string
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve tag: %w", err)
 	}
-	defer descriptor.Data.Close()
+	defer func() { _ = descriptor.Data.Close() }()
 
 	// The descriptor includes the digest
 	return descriptor.Digest, nil
@@ -581,7 +579,7 @@ func (c *Client) getFromCache(ctx context.Context, cacheKey, targetDir string) e
 	if err != nil {
 		return fmt.Errorf("cache miss: %w", err)
 	}
-	defer blobReader.Close()
+	defer func() { _ = blobReader.Close() }()
 
 	// Create archiver for extraction
 	archiver := NewTarGzArchiverWithFS(c.options.FS)
@@ -683,7 +681,10 @@ func (c *Client) removeAllFS(root string) error {
 	if remover, ok := c.options.FS.(interface {
 		RemoveAll(path string) error
 	}); ok {
-		return remover.RemoveAll(root)
+		if err := remover.RemoveAll(root); err != nil {
+			return fmt.Errorf("failed to remove directory %s: %w", root, err)
+		}
+		return nil
 	}
 
 	// Fallback: Simple recursive delete using Walk in reverse order: files before dirs.
@@ -709,5 +710,9 @@ func (c *Client) createTempDir(pattern string) (string, error) {
 		return tfs.TempDir("", pattern)
 	}
 	// Fallback: use os.MkdirTemp which handles uniqueness automatically
-	return os.MkdirTemp("", pattern)
+	dir, err := os.MkdirTemp("", pattern)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temporary directory: %w", err)
+	}
+	return dir, nil
 }

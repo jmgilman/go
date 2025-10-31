@@ -94,7 +94,7 @@ func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesRes
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Handle manifest to get the layer descriptor (which contains the actual blob)
 	var layerDesc ocispec.Descriptor
@@ -163,7 +163,7 @@ func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesRes
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch layer: %w", err)
 	}
-	defer layerReader.Close()
+	defer func() { _ = layerReader.Close() }()
 
 	// Read the full blob into memory
 	blobData, err := io.ReadAll(layerReader)
@@ -198,7 +198,11 @@ func (c *Client) getTOCFromCache(ctx context.Context, digest string) (*cache.TOC
 		return nil, fmt.Errorf("cache is not a coordinator")
 	}
 
-	return coordinator.GetTOC(ctx, digest)
+	toc, err := coordinator.GetTOC(ctx, digest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get TOC from cache: %w", err)
+	}
+	return toc, nil
 }
 
 // cacheTOC stores a TOC in the cache for future ListFiles operations.
@@ -241,7 +245,7 @@ func (c *Client) cacheTOC(ctx context.Context, digest string, tocEntries []*esta
 	}
 
 	// Store in cache (errors ignored - caching is best-effort)
-	coordinator.PutTOC(ctx, tocEntry)
+	_ = coordinator.PutTOC(ctx, tocEntry)
 }
 
 // parseTOCFromBytes parses the eStargz TOC from raw bytes.

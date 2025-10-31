@@ -467,7 +467,11 @@ func (cm *Coordinator) GetTagMapping(
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	return cm.tagCache.GetTagMapping(ctx, reference)
+	mapping, err := cm.tagCache.GetTagMapping(ctx, reference)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tag mapping: %w", err)
+	}
+	return mapping, nil
 }
 
 // PutTagMapping stores a tag-to-digest mapping in the cache.
@@ -480,7 +484,10 @@ func (cm *Coordinator) PutTagMapping(
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	return cm.tagCache.PutTagMapping(ctx, reference, digest)
+	if err := cm.tagCache.PutTagMapping(ctx, reference, digest); err != nil {
+		return fmt.Errorf("failed to put tag mapping: %w", err)
+	}
+	return nil
 }
 
 // HasTagMapping checks if a tag mapping exists and hasn't expired.
@@ -491,7 +498,11 @@ func (cm *Coordinator) HasTagMapping(
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	return cm.tagCache.HasTagMapping(ctx, reference)
+	has, err := cm.tagCache.HasTagMapping(ctx, reference)
+	if err != nil {
+		return false, fmt.Errorf("failed to check tag mapping: %w", err)
+	}
+	return has, nil
 }
 
 // GetTOC retrieves a cached Table of Contents for the given blob digest.
@@ -523,10 +534,10 @@ func (cm *Coordinator) GetTOC(
 
 	// Extract metadata
 	if fileCount, ok := entry.Metadata["file_count"]; ok {
-		fmt.Sscanf(fileCount, "%d", &tocEntry.FileCount)
+		fmt.Sscanf(fileCount, "%d", &tocEntry.FileCount) //nolint:errcheck
 	}
 	if totalSize, ok := entry.Metadata["total_size"]; ok {
-		fmt.Sscanf(totalSize, "%d", &tocEntry.TotalSize)
+		fmt.Sscanf(totalSize, "%d", &tocEntry.TotalSize) //nolint:errcheck
 	}
 
 	return tocEntry, nil
@@ -588,7 +599,7 @@ func (cm *Coordinator) Clear(ctx context.Context) error {
 
 // Get retrieves a cache entry by key (implements Cache interface).
 // This is a generic accessor that works with any cache key type.
-func (cm *Coordinator) Get(ctx context.Context, key string) (*Entry, error) {
+func (cm *Coordinator) Get(_ context.Context, key string) (*Entry, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
@@ -617,14 +628,14 @@ func (cm *Coordinator) Get(ctx context.Context, key string) (*Entry, error) {
 	// Update access time
 	indexEntry.AccessedAt = time.Now()
 	indexEntry.AccessCount++
-	cm.index.Put(key, indexEntry)
+	_ = cm.index.Put(key, indexEntry)
 
 	return entry, nil
 }
 
 // Put stores a cache entry (implements Cache interface).
 // This is a generic setter that works with any cache entry.
-func (cm *Coordinator) Put(ctx context.Context, key string, entry *Entry) error {
+func (cm *Coordinator) Put(_ context.Context, key string, entry *Entry) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 

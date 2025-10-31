@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestConvertTOCToListResult tests conversion of TOC entries to list result
+// TestConvertTOCToListResult tests conversion of TOC entries to list result.
 func TestConvertTOCToListResult(t *testing.T) {
 	// Create a test archive with known files
 	sourceDir := t.TempDir()
@@ -66,7 +66,7 @@ func TestConvertTOCToListResult(t *testing.T) {
 	assert.True(t, fileNames["dir/file3.json"], "Should find dir/file3.json")
 }
 
-// TestListFilesWithFilter tests filtering files by patterns
+// TestListFilesWithFilter tests filtering files by patterns.
 func TestListFilesWithFilter(t *testing.T) {
 	// Create test files
 	sourceDir := t.TempDir()
@@ -141,7 +141,7 @@ func TestListFilesWithFilter(t *testing.T) {
 	})
 }
 
-// TestParseTOCFromBytes tests parsing TOC from bytes
+// TestParseTOCFromBytes tests parsing TOC from bytes.
 func TestParseTOCFromBytes(t *testing.T) {
 	// Create a simple test archive
 	sourceDir := t.TempDir()
@@ -174,7 +174,7 @@ func TestParseTOCFromBytes(t *testing.T) {
 	assert.True(t, foundTestFile, "Should find test.txt in TOC")
 }
 
-// TestParseTOCFromBytes_InvalidData tests error handling for invalid data
+// TestParseTOCFromBytes_InvalidData tests error handling for invalid data.
 func TestParseTOCFromBytes_InvalidData(t *testing.T) {
 	// Test with invalid data
 	invalidData := []byte("not a valid estargz archive")
@@ -182,7 +182,7 @@ func TestParseTOCFromBytes_InvalidData(t *testing.T) {
 	assert.Error(t, err, "Should error on invalid data")
 }
 
-// TestCollectEntries tests collecting entries from TOC tree
+// TestCollectEntries tests collecting entries from TOC tree.
 func TestCollectEntries(t *testing.T) {
 	// Create a test archive with nested structure
 	sourceDir := t.TempDir()
@@ -227,7 +227,7 @@ func TestCollectEntries(t *testing.T) {
 	assert.True(t, hasDirs, "Should have directories")
 }
 
-// TestFileMetadata tests the FileMetadata structure
+// TestFileMetadata tests the FileMetadata structure.
 func TestFileMetadata(t *testing.T) {
 	// Create a FileMetadata instance
 	metadata := FileMetadata{
@@ -246,7 +246,7 @@ func TestFileMetadata(t *testing.T) {
 	assert.Equal(t, "reg", metadata.Type)
 }
 
-// TestListFilesResult tests the ListFilesResult structure
+// TestListFilesResult tests the ListFilesResult structure.
 func TestListFilesResult(t *testing.T) {
 	result := &ListFilesResult{
 		Files: []FileMetadata{
