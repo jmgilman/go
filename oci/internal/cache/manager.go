@@ -543,6 +543,195 @@ func (cm *Coordinator) GetTOC(
 	return tocEntry, nil
 }
 
+// GetVerificationResult retrieves a cached signature verification result.
+// The cache key is constructed as "verify:<digest>:<policy-hash>".
+//
+// Returns the cached verification result if:
+//   - An entry exists with the given digest and policy hash
+//   - The entry has not expired (based on TTL)
+//
+// Returns an error if:
+//   - No cache entry found
+//   - Entry has expired
+//   - Deserialization fails
+func (cm *Coordinator) GetVerificationResult(
+	ctx context.Context,
+	digest string,
+	policyHash string,
+) (*VerificationResult, error) {
+	start := time.Now()
+	logger := cm.logger.WithOperation("get_verification").WithDigest(digest)
+
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// Generate cache key: verify:<digest>:<policy-hash>
+	key := fmt.Sprintf("verify:%s:%s", digest, policyHash)
+
+	// Check if entry exists in index
+	indexEntry, found := cm.index.Get(key)
+	if !found {
+		duration := time.Since(start)
+		cm.metrics.RecordMiss("verification", 0)
+		cm.metrics.RecordLatency("get", duration)
+		LogCacheMiss(ctx, logger, "get_verification", "entry not found")
+		return nil, fmt.Errorf("verification result not found in cache")
+	}
+
+	// Check if expired
+	if indexEntry.IsExpired() {
+		duration := time.Since(start)
+		cm.metrics.RecordMiss("verification", 0)
+		cm.metrics.RecordLatency("get", duration)
+		LogCacheMiss(ctx, logger, "get_verification", "entry expired")
+		return nil, ErrCacheExpired
+	}
+
+	// Load entry data from storage
+	entryPath := filepath.Join(cm.storage.rootPath, indexEntry.FilePath)
+	data, err := cm.storage.fs.ReadFile(entryPath)
+	if err != nil {
+		duration := time.Since(start)
+		cm.metrics.RecordMiss("verification", 0)
+		cm.metrics.RecordError()
+		cm.metrics.RecordLatency("get", duration)
+		return nil, fmt.Errorf("failed to read verification result: %w", err)
+	}
+
+	// Reconstruct entry
+	entry := &Entry{
+		Key:         key,
+		Data:        data,
+		Metadata:    indexEntry.Metadata,
+		CreatedAt:   indexEntry.CreatedAt,
+		AccessedAt:  indexEntry.AccessedAt,
+		TTL:         indexEntry.TTL,
+		AccessCount: indexEntry.AccessCount,
+	}
+
+	// Deserialize verification result
+	result, err := VerificationResultFromEntry(entry)
+	if err != nil {
+		duration := time.Since(start)
+		cm.metrics.RecordMiss("verification", 0)
+		cm.metrics.RecordError()
+		cm.metrics.RecordLatency("get", duration)
+		return nil, fmt.Errorf("failed to deserialize verification result: %w", err)
+	}
+
+	// Double-check expiration using result's TTL
+	if result.IsExpired() {
+		duration := time.Since(start)
+		cm.metrics.RecordMiss("verification", 0)
+		cm.metrics.RecordLatency("get", duration)
+		LogCacheMiss(ctx, logger, "get_verification", "result expired")
+		return nil, ErrCacheExpired
+	}
+
+	duration := time.Since(start)
+	size := result.Size()
+	cm.metrics.RecordHit("verification", size)
+	cm.metrics.RecordLatency("get", duration)
+	LogCacheHit(ctx, logger, "get_verification", size)
+	LogCacheOperation(ctx, logger, "get_verification", duration, true, size, nil)
+
+	// Update access tracking
+	indexEntry.AccessedAt = time.Now()
+	indexEntry.AccessCount++
+
+	return result, nil
+}
+
+// PutVerificationResult stores a signature verification result in the cache.
+// The cache key is constructed as "verify:<digest>:<policy-hash>".
+//
+// The verification result includes:
+//   - Digest: Artifact content digest
+//   - Verified: Whether verification passed
+//   - Signer: Identity of the signer
+//   - PolicyHash: Hash of the policy used
+//   - RekorEntry: Transparency log entry (optional)
+//   - TTL: Time-to-live for this result
+//
+// Returns an error if:
+//   - Serialization fails
+//   - Storage write fails
+//   - Index update fails
+func (cm *Coordinator) PutVerificationResult(
+	ctx context.Context,
+	result *VerificationResult,
+) error {
+	start := time.Now()
+	logger := cm.logger.WithOperation("put_verification").WithDigest(result.Digest)
+
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// Generate cache key: verify:<digest>:<policy-hash>
+	key := fmt.Sprintf("verify:%s:%s", result.Digest, result.PolicyHash)
+
+	// Convert verification result to cache entry
+	entry, err := result.ToEntry(key)
+	if err != nil {
+		duration := time.Since(start)
+		cm.metrics.RecordError()
+		cm.metrics.RecordLatency("put", duration)
+		LogCacheOperation(ctx, logger, "put_verification", duration, false, 0, err)
+		return fmt.Errorf("failed to convert verification result to entry: %w", err)
+	}
+
+	// Determine storage path
+	filePath := fmt.Sprintf("verifications/%s", key)
+	entryPath := filepath.Join(cm.storage.rootPath, filePath)
+
+	// Write entry data to storage
+	if err := cm.storage.fs.MkdirAll(filepath.Join(cm.storage.rootPath, "verifications"), 0755); err != nil {
+		duration := time.Since(start)
+		cm.metrics.RecordError()
+		cm.metrics.RecordLatency("put", duration)
+		return fmt.Errorf("failed to create verifications directory: %w", err)
+	}
+
+	if err := cm.storage.fs.WriteFile(entryPath, entry.Data, 0644); err != nil {
+		duration := time.Since(start)
+		cm.metrics.RecordError()
+		cm.metrics.RecordLatency("put", duration)
+		LogCacheOperation(ctx, logger, "put_verification", duration, false, 0, err)
+		return fmt.Errorf("failed to write verification result: %w", err)
+	}
+
+	// Create index entry
+	size := result.Size()
+	indexEntry := &IndexEntry{
+		Key:         key,
+		Size:        size,
+		CreatedAt:   result.Timestamp,
+		AccessedAt:  result.Timestamp,
+		TTL:         result.TTL,
+		AccessCount: 1,
+		FilePath:    filePath,
+		Metadata:    entry.Metadata,
+	}
+
+	if err := cm.index.Put(key, indexEntry); err != nil {
+		duration := time.Since(start)
+		cm.metrics.RecordError()
+		cm.metrics.RecordLatency("put", duration)
+		LogCacheOperation(ctx, logger.WithSize(size), "put_verification", duration, false, size, err)
+		return fmt.Errorf("failed to index verification result: %w", err)
+	}
+
+	duration := time.Since(start)
+	cm.metrics.RecordPut("verification", size)
+	cm.metrics.RecordLatency("put", duration)
+	LogCacheOperation(ctx, logger.WithSize(size), "put_verification", duration, true, size, nil)
+
+	// Notify eviction strategy
+	cm.eviction.OnAdd(entry)
+
+	return nil
+}
+
 // PutTOC caches a Table of Contents for the given blob digest.
 func (cm *Coordinator) PutTOC(
 	ctx context.Context,

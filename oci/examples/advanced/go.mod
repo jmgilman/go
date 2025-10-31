@@ -1,6 +1,6 @@
 module advanced
 
-go 1.24.2
+go 1.25.3
 
 replace github.com/jmgilman/go/oci => ../..
 

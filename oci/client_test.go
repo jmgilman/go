@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/jmgilman/go/oci/internal/oras"
 	"github.com/jmgilman/go/oci/internal/oras/mocks"
+	"github.com/jmgilman/go/oci/internal/testutil"
 )
 
 // TestNewClient tests creating a client with default options
@@ -830,4 +832,355 @@ func TestClient_WithMemFS_PushAndPull_WithMocks(t *testing.T) {
 	b, err := mem.ReadFile("/dst/hello.txt")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("hi"), b)
+}
+
+// TestClient_Pull_WithNilVerifier tests that Pull works without signature verification
+func TestClient_Pull_WithNilVerifier(t *testing.T) {
+	mockTarGzData, err := createMockTarGzData()
+	require.NoError(t, err)
+
+	mockORAS := &mocks.ClientMock{
+		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+			return &oras.PullDescriptor{
+				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+				Data:      &mockReadCloserForTest{data: mockTarGzData},
+				Size:      int64(len(mockTarGzData)),
+				Digest:    "sha256:abc123",
+			}, nil
+		},
+	}
+
+	// Create client without signature verifier (nil)
+	client, err := NewWithOptions(
+		WithORASClient(mockORAS),
+		WithSignatureVerifier(nil), // Explicitly nil
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	targetDir := t.TempDir()
+
+	// Pull should succeed without verification
+	err = client.Pull(ctx, "example.com/test/repo:tag", targetDir)
+	assert.NoError(t, err, "Pull should succeed without verifier")
+
+	// Verify extraction happened
+	entries, err := os.ReadDir(targetDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries)
+}
+
+// TestClient_Pull_WithSuccessVerifier tests that Pull succeeds when verifier returns success
+func TestClient_Pull_WithSuccessVerifier(t *testing.T) {
+	mockTarGzData, err := createMockTarGzData()
+	require.NoError(t, err)
+
+	mockORAS := &mocks.ClientMock{
+		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+			return &oras.PullDescriptor{
+				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+				Data:      &mockReadCloserForTest{data: mockTarGzData},
+				Size:      int64(len(mockTarGzData)),
+				Digest:    "sha256:valid123",
+			}, nil
+		},
+	}
+
+	// Create mock verifier that always succeeds
+	verifier := &testutil.MockVerifier{
+		ShouldSucceed: true,
+		VerifyCalls:   make([]testutil.VerifyCall, 0),
+	}
+
+	client, err := NewWithOptions(
+		WithORASClient(mockORAS),
+		WithSignatureVerifier(verifier),
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	targetDir := t.TempDir()
+
+	// Pull should succeed with successful verification
+	err = client.Pull(ctx, "example.com/test/repo:tag", targetDir)
+	assert.NoError(t, err, "Pull should succeed when verifier returns success")
+
+	// Verify verifier was called
+	assert.Equal(t, 1, len(verifier.VerifyCalls), "Verifier should be called once")
+	assert.Equal(t, "example.com/test/repo:tag", verifier.VerifyCalls[0].Reference)
+	assert.Equal(t, "sha256:valid123", verifier.VerifyCalls[0].Descriptor.Digest)
+
+	// Verify extraction happened
+	entries, err := os.ReadDir(targetDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries)
+}
+
+// TestClient_Pull_WithFailureVerifier tests that Pull fails when verifier returns error
+func TestClient_Pull_WithFailureVerifier(t *testing.T) {
+	mockTarGzData, err := createMockTarGzData()
+	require.NoError(t, err)
+
+	mockORAS := &mocks.ClientMock{
+		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+			return &oras.PullDescriptor{
+				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+				Data:      &mockReadCloserForTest{data: mockTarGzData},
+				Size:      int64(len(mockTarGzData)),
+				Digest:    "sha256:invalid456",
+			}, nil
+		},
+	}
+
+	// Create mock verifier that fails with signature error
+	verifier := &testutil.MockVerifier{
+		ShouldSucceed: false,
+		ErrorToReturn: &BundleError{
+			Op:        "verify",
+			Reference: "example.com/test/repo:tag",
+			Err:       ErrSignatureInvalid,
+			SignatureInfo: &SignatureErrorInfo{
+				Digest:       "sha256:invalid456",
+				Signer:       "",
+				Reason:       "cryptographic verification failed",
+				FailureStage: "crypto",
+			},
+		},
+		VerifyCalls: make([]testutil.VerifyCall, 0),
+	}
+
+	client, err := NewWithOptions(
+		WithORASClient(mockORAS),
+		WithSignatureVerifier(verifier),
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	targetDir := t.TempDir()
+
+	// Pull should fail when verifier returns error
+	err = client.Pull(ctx, "example.com/test/repo:tag", targetDir)
+	assert.Error(t, err, "Pull should fail when verifier returns error")
+	assert.Contains(t, err.Error(), "signature verification failed")
+
+	// Verify error is a BundleError with signature info
+	var bundleErr *BundleError
+	assert.True(t, errors.As(err, &bundleErr), "Error should be BundleError")
+	assert.True(t, bundleErr.IsSignatureError(), "Error should be signature error")
+	assert.NotNil(t, bundleErr.SignatureInfo)
+	assert.Equal(t, "sha256:invalid456", bundleErr.SignatureInfo.Digest)
+
+	// Verify verifier was called
+	assert.Equal(t, 1, len(verifier.VerifyCalls))
+
+	// Verify extraction did NOT happen (target directory should be empty or not exist)
+	entries, _ := os.ReadDir(targetDir)
+	assert.Empty(t, entries, "Target directory should be empty when verification fails")
+}
+
+// TestClient_Pull_VerificationErrorsNotRetried tests that signature errors are not retried
+func TestClient_Pull_VerificationErrorsNotRetried(t *testing.T) {
+	mockTarGzData, err := createMockTarGzData()
+	require.NoError(t, err)
+
+	mockORAS := &mocks.ClientMock{
+		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+			return &oras.PullDescriptor{
+				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+				Data:      &mockReadCloserForTest{data: mockTarGzData},
+				Size:      int64(len(mockTarGzData)),
+				Digest:    "sha256:test",
+			}, nil
+		},
+	}
+
+	// Create mock verifier that fails
+	verifier := &testutil.MockVerifier{
+		ShouldSucceed: false,
+		ErrorToReturn: ErrSignatureInvalid,
+		VerifyCalls:   make([]testutil.VerifyCall, 0),
+	}
+
+	client, err := NewWithOptions(
+		WithORASClient(mockORAS),
+		WithSignatureVerifier(verifier),
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	targetDir := t.TempDir()
+
+	// Pull with retries configured (should not retry on signature error)
+	err = client.Pull(ctx, "example.com/test/repo:tag", targetDir,
+		WithPullMaxRetries(3), // Configure retries
+	)
+
+	assert.Error(t, err)
+
+	// Verifier should only be called once (no retries for signature errors)
+	assert.Equal(t, 1, len(verifier.VerifyCalls), "Signature errors should not be retried")
+}
+
+// TestClient_Pull_DescriptorDataClosedOnVerificationFailure tests that descriptor.Data is closed on verification failure
+func TestClient_Pull_DescriptorDataClosedOnVerificationFailure(t *testing.T) {
+	mockTarGzData, err := createMockTarGzData()
+	require.NoError(t, err)
+
+	// Track if Close() was called
+	closeCalled := false
+
+	mockORAS := &mocks.ClientMock{
+		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+			return &oras.PullDescriptor{
+				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+				Data: &testReadCloserWithTracking{
+					data:        mockTarGzData,
+					closeCalled: &closeCalled,
+				},
+				Size:   int64(len(mockTarGzData)),
+				Digest: "sha256:test",
+			}, nil
+		},
+	}
+
+	// Create failing verifier
+	verifier := &testutil.MockVerifier{
+		ShouldSucceed: false,
+		ErrorToReturn: ErrSignatureInvalid,
+		VerifyCalls:   make([]testutil.VerifyCall, 0),
+	}
+
+	client, err := NewWithOptions(
+		WithORASClient(mockORAS),
+		WithSignatureVerifier(verifier),
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	targetDir := t.TempDir()
+
+	// Pull should fail
+	err = client.Pull(ctx, "example.com/test/repo:tag", targetDir)
+	assert.Error(t, err)
+
+	// Verify Close() was called on descriptor.Data
+	assert.True(t, closeCalled, "descriptor.Data should be closed on verification failure")
+}
+
+// TestClient_Pull_SignatureErrorTypes tests different signature error types
+func TestClient_Pull_SignatureErrorTypes(t *testing.T) {
+	testCases := []struct {
+		name          string
+		error         error
+		expectedCheck func(*BundleError) bool
+	}{
+		{
+			name:  "ErrSignatureNotFound",
+			error: ErrSignatureNotFound,
+			expectedCheck: func(e *BundleError) bool {
+				return errors.Is(e.Err, ErrSignatureNotFound)
+			},
+		},
+		{
+			name:  "ErrSignatureInvalid",
+			error: ErrSignatureInvalid,
+			expectedCheck: func(e *BundleError) bool {
+				return errors.Is(e.Err, ErrSignatureInvalid)
+			},
+		},
+		{
+			name:  "ErrUntrustedSigner",
+			error: ErrUntrustedSigner,
+			expectedCheck: func(e *BundleError) bool {
+				return errors.Is(e.Err, ErrUntrustedSigner)
+			},
+		},
+		{
+			name:  "ErrRekorVerificationFailed",
+			error: ErrRekorVerificationFailed,
+			expectedCheck: func(e *BundleError) bool {
+				return errors.Is(e.Err, ErrRekorVerificationFailed)
+			},
+		},
+		{
+			name:  "ErrCertificateExpired",
+			error: ErrCertificateExpired,
+			expectedCheck: func(e *BundleError) bool {
+				return errors.Is(e.Err, ErrCertificateExpired)
+			},
+		},
+		{
+			name:  "ErrInvalidAnnotations",
+			error: ErrInvalidAnnotations,
+			expectedCheck: func(e *BundleError) bool {
+				return errors.Is(e.Err, ErrInvalidAnnotations)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockTarGzData, err := createMockTarGzData()
+			require.NoError(t, err)
+
+			mockORAS := &mocks.ClientMock{
+				PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+					return &oras.PullDescriptor{
+						MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+						Data:      &mockReadCloserForTest{data: mockTarGzData},
+						Size:      int64(len(mockTarGzData)),
+						Digest:    "sha256:test",
+					}, nil
+				},
+			}
+
+			verifier := &testutil.MockVerifier{
+				ShouldSucceed: false,
+				ErrorToReturn: &BundleError{
+					Op:        "verify",
+					Reference: "test-ref",
+					Err:       tc.error,
+				},
+				VerifyCalls: make([]testutil.VerifyCall, 0),
+			}
+
+			client, err := NewWithOptions(
+				WithORASClient(mockORAS),
+				WithSignatureVerifier(verifier),
+			)
+			require.NoError(t, err)
+
+			ctx := context.Background()
+			targetDir := t.TempDir()
+
+			err = client.Pull(ctx, "example.com/test/repo:tag", targetDir)
+			assert.Error(t, err)
+
+			var bundleErr *BundleError
+			require.True(t, errors.As(err, &bundleErr))
+			assert.True(t, bundleErr.IsSignatureError())
+			assert.True(t, tc.expectedCheck(bundleErr))
+		})
+	}
+}
+
+// testReadCloserWithTracking wraps a ReadCloser and tracks if Close() was called
+type testReadCloserWithTracking struct {
+	data        []byte
+	offset      int
+	closeCalled *bool
+}
+
+func (t *testReadCloserWithTracking) Read(p []byte) (n int, err error) {
+	if t.offset >= len(t.data) {
+		return 0, io.EOF
+	}
+	n = copy(p, t.data[t.offset:])
+	t.offset += n
+	return n, nil
+}
+
+func (t *testReadCloserWithTracking) Close() error {
+	*t.closeCalled = true
+	return nil
 }

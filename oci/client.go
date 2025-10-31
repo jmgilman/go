@@ -241,6 +241,17 @@ func isRetryableError(err error) bool {
 		return true
 	}
 
+	// Signature verification errors are not retryable because they are deterministic
+	// If a signature is invalid once, it will always be invalid
+	if errors.Is(err, ErrSignatureNotFound) ||
+		errors.Is(err, ErrSignatureInvalid) ||
+		errors.Is(err, ErrUntrustedSigner) ||
+		errors.Is(err, ErrRekorVerificationFailed) ||
+		errors.Is(err, ErrCertificateExpired) ||
+		errors.Is(err, ErrInvalidAnnotations) {
+		return false
+	}
+
 	// Check for other retryable network errors by examining the error string
 	// (netErr.Temporary() is deprecated since Go 1.18)
 
@@ -329,6 +340,7 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 
 // Pull downloads and extracts an OCI artifact to the specified directory.
 // Supports selective extraction using glob patterns and enforces security validation.
+// If a SignatureVerifier is configured, signatures are verified before extraction.
 func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...PullOption) error {
 	// Thread safety: use read lock since we're only reading options
 	c.mu.RLock()
@@ -358,6 +370,16 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 		return fmt.Errorf("failed to pull artifact after %d retries: %w", pullOpts.MaxRetries, pullErr)
 	}
 
+	// Verify signature before extraction if verifier is configured
+	// This ensures only cryptographically verified artifacts are written to disk
+	if c.shouldVerifySignature() {
+		if err := c.verifySignature(ctx, reference, descriptor); err != nil {
+			// Close descriptor data on verification failure to prevent resource leak
+			_ = descriptor.Data.Close()
+			return fmt.Errorf("signature verification failed: %w", err)
+		}
+	}
+
 	defer descriptor.Data.Close()
 
 	extractOpts := ExtractOptions{
@@ -378,6 +400,56 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 	if err := c.extractAtomically(ctx, archiver, descriptor.Data, targetDir, extractOpts); err != nil {
 		return fmt.Errorf("failed to extract archive: %w", err)
 	}
+	return nil
+}
+
+// shouldVerifySignature checks if signature verification is enabled for this client.
+// Returns true if a SignatureVerifier is configured in ClientOptions.
+func (c *Client) shouldVerifySignature() bool {
+	return c.options.SignatureVerifier != nil
+}
+
+// verifySignature performs signature verification on an OCI artifact.
+// This method delegates to the configured SignatureVerifier and wraps
+// any errors with additional context.
+//
+// The verifier is called after the manifest is fetched but before the blob
+// is extracted, ensuring only verified artifacts reach the filesystem.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - reference: Full OCI reference (e.g., "ghcr.io/org/repo:tag")
+//   - descriptor: Pull descriptor containing digest, size, and data stream
+//
+// Returns:
+//   - nil if verification succeeds
+//   - BundleError with SignatureErrorInfo if verification fails
+func (c *Client) verifySignature(ctx context.Context, reference string, descriptor *orasint.PullDescriptor) error {
+	if c.options.SignatureVerifier == nil {
+		return nil // No verifier configured, skip verification
+	}
+
+	// Call the verifier implementation
+	if err := c.options.SignatureVerifier.Verify(ctx, reference, descriptor); err != nil {
+		// If the error is already a BundleError, return it as-is
+		var bundleErr *BundleError
+		if errors.As(err, &bundleErr) {
+			return err
+		}
+
+		// Otherwise, wrap it in a BundleError for consistency
+		return &BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       err,
+			SignatureInfo: &SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       err.Error(),
+				FailureStage: "unknown",
+			},
+		}
+	}
+
 	return nil
 }
 
