@@ -494,30 +494,6 @@ func TestTarGzArchiver_MemFS_RoundTrip(t *testing.T) {
 	assert.Equal(t, "B", string(bb))
 }
 
-// mockArchiver implements Archiver interface for testing
-type mockArchiver struct{}
-
-func (m *mockArchiver) Archive(ctx context.Context, sourceDir string, output io.Writer) error {
-	return nil
-}
-
-func (m *mockArchiver) ArchiveWithProgress(
-	ctx context.Context,
-	sourceDir string,
-	output io.Writer,
-	progress func(current, total int64),
-) error {
-	return nil
-}
-
-func (m *mockArchiver) Extract(ctx context.Context, input io.Reader, targetDir string, opts ExtractOptions) error {
-	return nil
-}
-
-func (m *mockArchiver) MediaType() string {
-	return "application/octet-stream"
-}
-
 // TestTarGzArchiver_EstargzFormat verifies that archives are created in eStargz format
 // with the expected metadata files (TOC and landmark)
 func TestTarGzArchiver_EstargzFormat(t *testing.T) {
