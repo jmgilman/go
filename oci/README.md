@@ -155,6 +155,8 @@ The [`examples/`](./examples/) directory contains runnable examples:
 - **[Advanced usage](./examples/advanced/)** - Custom options and error handling
 - **[Custom auth](./examples/custom_auth/)** - Different authentication methods
 - **[Custom archiver](./examples/custom_archiver/)** - Implementing custom archive formats
+- **[Signature verification](./examples/signature_verification/)** - Basic signature verification with public key and keyless modes
+- **[Advanced signatures](./examples/signature_verification_advanced/)** - Multi-signature, annotation policies, Rekor, and caching
 
 ## Advanced Usage
 
@@ -303,6 +305,235 @@ client, err := ocibundle.NewWithOptions(
     ocibundle.WithInsecureHTTP(),
 )
 ```
+
+## Signature Verification
+
+The module provides optional signature verification for OCI artifacts using Sigstore/Cosign. This enables supply chain security by ensuring artifacts are cryptographically verified before extraction.
+
+### Overview
+
+Signature verification is implemented in a separate submodule (`github.com/jmgilman/go/oci/signature`) to keep the main package dependency-free. Users who need signature verification can opt-in without affecting those who don't.
+
+**Key Features:**
+- **Supply Chain Security**: Verify artifact authenticity before extraction
+- **Zero Impact**: No additional dependencies for users who don't need verification
+- **Multiple Modes**: Public key and keyless (OIDC) verification
+- **Performance**: Cache verification results to avoid redundant checks
+- **Standards Compliance**: Uses Sigstore/Cosign format (industry standard)
+- **Policy-Based**: Flexible identity and annotation policies
+
+### Quick Start with Public Key Verification
+
+```go
+import (
+    "github.com/jmgilman/go/oci"
+    "github.com/jmgilman/go/oci/signature"
+)
+
+// Load public key
+pubKey, err := signature.LoadPublicKey("cosign.pub")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create verifier
+verifier := signature.NewPublicKeyVerifier(pubKey)
+
+// Create client with verification
+client, err := ocibundle.NewWithOptions(
+    ocibundle.WithSignatureVerifier(verifier),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Pull will verify signature before extraction
+err = client.Pull(ctx, "ghcr.io/org/app:v1.0", "./app")
+if err != nil {
+    var bundleErr *ocibundle.BundleError
+    if errors.As(err, &bundleErr) && bundleErr.IsSignatureError() {
+        log.Printf("Signature verification failed: %s", bundleErr.SignatureInfo.Reason)
+    }
+    log.Fatal(err)
+}
+```
+
+### Quick Start with Keyless Verification
+
+```go
+import (
+    "github.com/jmgilman/go/oci"
+    "github.com/jmgilman/go/oci/signature"
+)
+
+// Create keyless verifier with identity restrictions
+verifier := signature.NewKeylessVerifier(
+    signature.WithAllowedIdentities("*@example.com"),
+    signature.WithRekor(true), // Require transparency log
+)
+
+// Create client with verification
+client, err := ocibundle.NewWithOptions(
+    ocibundle.WithSignatureVerifier(verifier),
+)
+
+// Pull will verify signature using Sigstore keyless signing
+err = client.Pull(ctx, "ghcr.io/org/app:v1.0", "./app")
+```
+
+### Verification Modes
+
+#### 1. Public Key Verification
+Traditional cryptographic signing with a public/private key pair.
+
+**Pros:** Offline, simple, fast
+**Cons:** Key management burden, key rotation complexity
+
+```go
+pubKey, _ := signature.LoadPublicKey("cosign.pub")
+verifier := signature.NewPublicKeyVerifier(pubKey)
+```
+
+#### 2. Keyless Verification (OIDC)
+Sigstore's keyless signing using OIDC identities and short-lived certificates.
+
+**Pros:** No key management, transparency via Rekor, identity-based
+**Cons:** Requires internet access, dependency on Sigstore infrastructure
+
+```go
+verifier := signature.NewKeylessVerifier(
+    signature.WithAllowedIdentities("*@trusted-org.com"),
+    signature.WithRequiredIssuer("https://github.com/login/oauth"),
+    signature.WithRekor(true),
+)
+```
+
+### Policy Configuration
+
+Control signature verification with flexible policies:
+
+```go
+verifier := signature.NewKeylessVerifier(
+    // Identity policies
+    signature.WithAllowedIdentities("*@trusted-org.com"),
+    signature.WithRequiredIssuer("https://github.com/login/oauth"),
+
+    // Annotation policies
+    signature.WithRequiredAnnotations(map[string]string{
+        "build-system": "github-actions",
+        "verified": "true",
+    }),
+
+    // Transparency requirements
+    signature.WithRekor(true),
+
+    // Enforcement mode
+    signature.WithEnforceMode(true), // Require all artifacts to be signed
+)
+```
+
+### Verification Caching
+
+Cache verification results to improve performance:
+
+```go
+import "github.com/jmgilman/go/oci/internal/cache"
+
+// Create cache coordinator
+cacheConfig := cache.Config{
+    MaxSizeBytes: 100 * 1024 * 1024, // 100MB
+    DefaultTTL:   time.Hour,
+}
+coordinator, _ := cache.NewCoordinator(ctx, cacheConfig, fs, "/cache", logger)
+
+// Create verifier with caching
+verifier := signature.NewKeylessVerifier(
+    signature.WithAllowedIdentities("*@example.com"),
+    signature.WithCacheTTL(time.Hour),
+).WithCacheForVerifier(coordinator)
+```
+
+**Performance Impact:**
+- **Without caching**: 55-730ms per verification (depending on mode)
+- **With caching**: <1ms per verification (99.8% reduction)
+- **Cache hit rate**: Typically 90%+ for repeated pulls
+
+### Error Handling
+
+Signature verification errors provide detailed context:
+
+```go
+err := client.Pull(ctx, reference, targetDir)
+if err != nil {
+    var bundleErr *ocibundle.BundleError
+    if errors.As(err, &bundleErr) && bundleErr.IsSignatureError() {
+        // Signature verification failed
+        fmt.Printf("Digest: %s\n", bundleErr.SignatureInfo.Digest)
+        fmt.Printf("Reason: %s\n", bundleErr.SignatureInfo.Reason)
+        fmt.Printf("Stage: %s\n", bundleErr.SignatureInfo.FailureStage)
+
+        // Check specific error type
+        switch {
+        case errors.Is(bundleErr.Err, ocibundle.ErrSignatureNotFound):
+            // Handle missing signature
+        case errors.Is(bundleErr.Err, ocibundle.ErrUntrustedSigner):
+            // Handle untrusted identity
+        case errors.Is(bundleErr.Err, ocibundle.ErrSignatureInvalid):
+            // Handle invalid signature
+        }
+    }
+}
+```
+
+### Security Considerations
+
+**Threats Mitigated:**
+- ✅ Malicious artifacts: Unsigned or tampered artifacts rejected before extraction
+- ✅ Supply chain attacks: Only artifacts from trusted signers allowed
+- ✅ Man-in-the-middle: Signatures verified cryptographically
+- ✅ Compromised registry: Registry cannot serve malicious content without valid signature
+
+**Best Practices:**
+1. **Enforce mode in production**: Use `SignatureModeEnforce` to require signatures
+2. **Use keyless when possible**: Reduces key management burden
+3. **Restrict identities**: Use specific email patterns, not wildcards
+4. **Enable Rekor**: Provides transparency and non-repudiation
+5. **Monitor verification failures**: Log and alert on signature errors
+
+### Troubleshooting
+
+**Signature not found:**
+```
+Error: signature not found
+```
+- Ensure the artifact was signed with Cosign
+- Check the signature reference format: `repo:sha256-<digest>.sig`
+- Verify you have read access to the signature artifact
+
+**Untrusted signer:**
+```
+Error: untrusted signer
+```
+- Check the allowed identity patterns match the actual signer
+- Verify the certificate issuer matches your policy
+- For public key mode, ensure the correct public key is loaded
+
+**Rekor verification failed:**
+```
+Error: rekor verification failed
+```
+- Ensure network access to Rekor server (rekor.sigstore.dev)
+- Check if the signature was uploaded to Rekor
+- Verify Rekor URL configuration is correct
+
+**Cache issues:**
+- Clear cache if policy changes: Delete cache directory
+- Increase TTL for better performance
+- Monitor cache hit rate via metrics
+
+### Further Documentation
+
+For complete documentation and advanced usage, see the [signature submodule README](./signature/README.md).
 
 ## Security
 

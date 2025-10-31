@@ -32,6 +32,25 @@ type ClientOptions struct {
 	// CacheConfig contains cache configuration for OCI operations.
 	// If nil, caching is disabled.
 	CacheConfig *CacheConfig
+
+	// SignatureVerifier validates OCI artifact signatures before extraction.
+	// If nil, signature verification is disabled and artifacts are pulled without validation.
+	// Implementations are provided by the oci/signature submodule.
+	//
+	// When configured, the verifier is called after the manifest is fetched
+	// but before the blob is extracted. This ensures only cryptographically
+	// verified artifacts are written to disk.
+	//
+	// Example usage:
+	//   import "github.com/jmgilman/go/oci/signature"
+	//
+	//   pubKey, _ := signature.LoadPublicKey("cosign.pub")
+	//   verifier := signature.NewPublicKeyVerifier(pubKey)
+	//
+	//   client, _ := ocibundle.NewWithOptions(
+	//       ocibundle.WithSignatureVerifier(verifier),
+	//   )
+	SignatureVerifier SignatureVerifier
 }
 
 // HTTPConfig contains configuration for HTTP transport settings.
@@ -444,5 +463,64 @@ func WithCachePolicy(policy CachePolicy) ClientOption {
 			opts.CacheConfig = &CacheConfig{}
 		}
 		opts.CacheConfig.Policy = policy
+	}
+}
+
+// WithSignatureVerifier configures signature verification for OCI artifacts.
+// When set, all Pull operations will verify artifact signatures before extraction.
+// If verification fails, the pull operation will fail and return a BundleError
+// with SignatureErrorInfo details.
+//
+// The verifier is called after the manifest is fetched but before the blob is
+// extracted, ensuring only cryptographically verified artifacts reach the filesystem.
+//
+// Signature verification requires the oci/signature submodule:
+//
+//	import (
+//	    "github.com/jmgilman/go/oci"
+//	    "github.com/jmgilman/go/oci/signature"
+//	)
+//
+//	// Public key verification
+//	pubKey, err := signature.LoadPublicKey("cosign.pub")
+//	if err != nil {
+//	    return err
+//	}
+//	verifier := signature.NewPublicKeyVerifier(pubKey)
+//
+//	client, err := oci.NewWithOptions(
+//	    oci.WithSignatureVerifier(verifier),
+//	)
+//
+//	// Pull will verify signature before extraction
+//	err = client.Pull(ctx, "ghcr.io/org/app:v1.0", "./app")
+//	if err != nil {
+//	    var bundleErr *oci.BundleError
+//	    if errors.As(err, &bundleErr) && bundleErr.IsSignatureError() {
+//	        // Handle signature verification failure
+//	        log.Printf("Signature verification failed: %s",
+//	            bundleErr.SignatureInfo.Reason)
+//	    }
+//	}
+//
+// Keyless verification (Sigstore):
+//
+//	verifier := signature.NewKeylessVerifier(
+//	    signature.WithAllowedIdentities("*@example.com"),
+//	    signature.WithRekor(true), // Require transparency log
+//	)
+//
+//	client, err := oci.NewWithOptions(
+//	    oci.WithSignatureVerifier(verifier),
+//	)
+//
+// Pass nil to disable signature verification:
+//
+//	client, err := oci.NewWithOptions(
+//	    oci.WithSignatureVerifier(nil), // Explicitly disable
+//	)
+func WithSignatureVerifier(verifier SignatureVerifier) ClientOption {
+	return func(opts *ClientOptions) {
+		opts.SignatureVerifier = verifier
 	}
 }

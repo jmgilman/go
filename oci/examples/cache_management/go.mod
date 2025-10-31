@@ -1,6 +1,6 @@
 module cache_management
 
-go 1.24.2
+go 1.25.3
 
 require github.com/jmgilman/go/oci v0.1.0
 
