@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 
+	"github.com/jmgilman/go/oci/internal/cache"
 	orasint "github.com/jmgilman/go/oci/internal/oras"
 )
 
@@ -64,41 +66,7 @@ type ListFilesResult struct {
 }
 
 // ListFiles lists all files in an OCI artifact without downloading the full archive.
-// It uses HTTP Range requests to download only the eStargz Table of Contents (TOC),
-// which typically saves 99.9%+ of bandwidth compared to downloading the full archive.
-//
-// This function requires:
-//   - The artifact was created in eStargz format (all artifacts created by this module are)
-//   - The registry supports HTTP Range requests (most major registries do)
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeouts
-//   - reference: OCI reference (e.g., "ghcr.io/org/repo:tag")
-//
-// Returns:
-//   - ListFilesResult containing file metadata and statistics
-//   - Error if the operation fails
-//
-// Example:
-//
-//	result, err := client.ListFiles(ctx, "ghcr.io/myorg/bundle:v1.0")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	fmt.Printf("Total files: %d\n", result.FileCount)
-//	fmt.Printf("Total size: %d bytes\n", result.TotalSize)
-//
-//	for _, file := range result.Files {
-//	    if !file.IsDir {
-//	        fmt.Printf("  %s (%d bytes)\n", file.Name, file.Size)
-//	    }
-//	}
-//
-// Bandwidth savings example:
-//   - Archive size: 5 GB
-//   - TOC size: ~50 KB
-//   - Bandwidth saved: 99.999%
+// Uses HTTP Range requests to download only the TOC, saving significant bandwidth.
 func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesResult, error) {
 	// Thread safety: use read lock since we're only reading
 	c.mu.RLock()
@@ -153,15 +121,31 @@ func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesRes
 		layerDesc = manifestDesc
 	}
 
+	// Check TOC cache first for instant results (Phase 2 optimization)
+	// This avoids all network operations when TOC is cached
+	var tocEntries []*estargz.TOCEntry
+	digest := layerDesc.Digest.String()
+	cachedTOC, tocErr := c.getTOCFromCache(ctx, digest)
+	if tocErr == nil && cachedTOC != nil {
+		// Cache hit! Deserialize TOC and return immediately (0 network bytes)
+		if err := json.Unmarshal(cachedTOC.TOCData, &tocEntries); err == nil {
+			result := convertTOCToListResult(tocEntries)
+			return result, nil
+		}
+		// Deserialization failed - continue to fetch fresh TOC
+	}
+
 	// Try HTTP Range approach first for bandwidth optimization
 	// This downloads only ~100KB (footer + TOC) instead of the full blob
-	var tocEntries []*estargz.TOCEntry
 	blobURL, httpClient, urlErr := getBlobURLFromRepository(repo, layerDesc.Digest.String())
 	if urlErr == nil {
 		// Try extracting TOC via HTTP Range requests
 		tocEntries, err = extractTOCFromBlob(ctx, httpClient, blobURL, layerDesc.Size)
 		if err == nil {
 			// Success! We got the TOC with minimal bandwidth
+			// Cache the TOC for next time (Phase 2 optimization)
+			c.cacheTOC(ctx, digest, tocEntries)
+
 			// Convert TOC entries to file metadata and return
 			result := convertTOCToListResult(tocEntries)
 			return result, nil
@@ -193,10 +177,71 @@ func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesRes
 		return nil, fmt.Errorf("failed to parse TOC: %w", err)
 	}
 
+	// Cache the TOC for next time (Phase 2 optimization)
+	c.cacheTOC(ctx, digest, tocEntries)
+
 	// Convert TOC entries to file metadata
 	result := convertTOCToListResult(tocEntries)
 
 	return result, nil
+}
+
+// getTOCFromCache retrieves a cached TOC if available.
+// Returns nil if cache is not configured or TOC is not cached.
+func (c *Client) getTOCFromCache(ctx context.Context, digest string) (*cache.TOCCacheEntry, error) {
+	if c.cache == nil {
+		return nil, fmt.Errorf("cache not configured")
+	}
+
+	coordinator, ok := c.cache.(*cache.Coordinator)
+	if !ok {
+		return nil, fmt.Errorf("cache is not a coordinator")
+	}
+
+	return coordinator.GetTOC(ctx, digest)
+}
+
+// cacheTOC stores a TOC in the cache for future ListFiles operations.
+// Silently fails if cache is not configured.
+func (c *Client) cacheTOC(ctx context.Context, digest string, tocEntries []*estargz.TOCEntry) {
+	if c.cache == nil {
+		return // Cache not configured
+	}
+
+	coordinator, ok := c.cache.(*cache.Coordinator)
+	if !ok {
+		return // Not a coordinator
+	}
+
+	// Serialize TOC entries to JSON
+	tocData, err := json.Marshal(tocEntries)
+	if err != nil {
+		return // Serialization failed, silently skip caching
+	}
+
+	// Calculate statistics
+	var fileCount int
+	var totalSize int64
+	for _, entry := range tocEntries {
+		if entry.Type != "dir" && entry.Type != "chunk" {
+			fileCount++
+			totalSize += entry.Size
+		}
+	}
+
+	// Create TOC cache entry
+	tocEntry := &cache.TOCCacheEntry{
+		Digest:     digest,
+		TOCData:    tocData,
+		FileCount:  fileCount,
+		TotalSize:  totalSize,
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+		TTL:        24 * time.Hour, // TOCs don't change, can cache for 24 hours
+	}
+
+	// Store in cache (errors ignored - caching is best-effort)
+	coordinator.PutTOC(ctx, tocEntry)
 }
 
 // parseTOCFromBytes parses the eStargz TOC from raw bytes.
@@ -220,21 +265,19 @@ func parseTOCFromBytes(tocBytes []byte) ([]*estargz.TOCEntry, error) {
 
 	// Collect all TOC entries
 	var entries []*estargz.TOCEntry
-	collectEntries(rootEntry, &entries)
+	collectTOCEntries(rootEntry, &entries)
 
 	return entries, nil
 }
 
-// collectEntries recursively collects all TOC entries from the tree structure.
-func collectEntries(entry *estargz.TOCEntry, entries *[]*estargz.TOCEntry) {
-	// Add this entry if it's not the root
+// collectTOCEntries recursively collects all TOC entries from the tree structure.
+func collectTOCEntries(entry *estargz.TOCEntry, entries *[]*estargz.TOCEntry) {
 	if entry.Name != "" {
 		*entries = append(*entries, entry)
 	}
 
-	// Recursively collect children
 	entry.ForeachChild(func(_ string, child *estargz.TOCEntry) bool {
-		collectEntries(child, entries)
+		collectTOCEntries(child, entries)
 		return true
 	})
 }
@@ -292,7 +335,7 @@ func splitReference(full string) (repoPath, refPart string, isDigest bool) {
 		return "", "", false
 	}
 	// Find last slash to isolate the repo name tail
-	lastSlash := bytes.LastIndexByte([]byte(full), '/')
+	lastSlash := strings.LastIndex(full, "/")
 	if lastSlash == -1 {
 		return full, "", false
 	}
@@ -300,12 +343,12 @@ func splitReference(full string) (repoPath, refPart string, isDigest bool) {
 	tail := full[lastSlash+1:]
 
 	// Check for digest form (name@digest)
-	if at := bytes.IndexByte([]byte(tail), '@'); at != -1 {
+	if at := strings.Index(tail, "@"); at != -1 {
 		return head + "/" + tail[:at], tail[at+1:], true
 	}
 
 	// Check for tag form (name:tag) - look for colon in the tail only
-	if colon := bytes.IndexByte([]byte(tail), ':'); colon != -1 {
+	if colon := strings.Index(tail, ":"); colon != -1 {
 		return head + "/" + tail[:colon], tail[colon+1:], false
 	}
 
@@ -314,12 +357,6 @@ func splitReference(full string) (repoPath, refPart string, isDigest bool) {
 }
 
 // ListFilesWithFilter lists files matching the specified glob patterns.
-// This is similar to ListFiles but only returns files matching at least one pattern.
-//
-// Example:
-//
-//	// List only JSON and YAML files
-//	result, err := client.ListFilesWithFilter(ctx, reference, "**/*.json", "**/*.yaml")
 func (c *Client) ListFilesWithFilter(ctx context.Context, reference string, patterns ...string) (*ListFilesResult, error) {
 	// Get all files
 	allFiles, err := c.ListFiles(ctx, reference)

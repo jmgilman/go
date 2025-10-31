@@ -71,9 +71,9 @@ func main() {
 	runtimeDir := filepath.Join(cwd, "runtime")
 	if err := client.Pull(ctx, reference, runtimeDir,
 		ocibundle.WithFilesToExtract(
-			"config/app.json",       // Specific file
-			"config/database.yaml",  // Another specific file
-			"secrets/*.env",         // All .env files in secrets/
+			"config/app.json",      // Specific file
+			"config/database.yaml", // Another specific file
+			"secrets/*.env",        // All .env files in secrets/
 		),
 	); err != nil {
 		log.Fatalf("Failed to pull runtime config: %v", err)
@@ -85,9 +85,9 @@ func main() {
 	limitedDir := filepath.Join(cwd, "limited")
 	if err := client.Pull(ctx, reference, limitedDir,
 		ocibundle.WithFilesToExtract("**/*.json"),
-		ocibundle.WithPullMaxSize(1*1024*1024),      // 1MB total
-		ocibundle.WithPullMaxFileSize(100*1024),     // 100KB per file
-		ocibundle.WithPullMaxFiles(10),              // Max 10 files
+		ocibundle.WithPullMaxSize(1*1024*1024),  // 1MB total
+		ocibundle.WithPullMaxFileSize(100*1024), // 100KB per file
+		ocibundle.WithPullMaxFiles(10),          // Max 10 files
 	); err != nil {
 		log.Fatalf("Failed to pull with limits: %v", err)
 	}
@@ -145,7 +145,7 @@ func createSampleBundle() error {
 
 		// Secrets
 		"secrets/production.env": "DATABASE_PASSWORD=secret123\nAPI_KEY=abc123",
-		"secrets/staging.env": "DATABASE_PASSWORD=staging\nAPI_KEY=staging",
+		"secrets/staging.env":    "DATABASE_PASSWORD=staging\nAPI_KEY=staging",
 
 		// Source code
 		"src/main.go": `package main
@@ -173,10 +173,10 @@ go 1.24`,
 
 		// Documentation
 		"docs/README.md": "# Application Documentation\n\nThis is the app documentation.",
-		"docs/API.md": "# API Documentation\n\nAPI endpoints and usage.",
+		"docs/API.md":    "# API Documentation\n\nAPI endpoints and usage.",
 
 		// Data files
-		"data/sample.csv": "id,name,value\n1,test,100\n2,demo,200",
+		"data/sample.csv":  "id,name,value\n1,test,100\n2,demo,200",
 		"data/sample.json": `{"records": [{"id": 1, "name": "test"}]}`,
 	}
 

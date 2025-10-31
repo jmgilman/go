@@ -5,41 +5,6 @@ import (
 	"testing"
 )
 
-// TestValidatorInterface verifies the Validator interface is properly defined
-func TestValidatorInterface(t *testing.T) {
-	// Test that Validator interface exists and has the expected methods
-	var _ Validator = (*mockValidator)(nil)
-}
-
-// TestFileInfoStruct verifies the FileInfo struct exists
-func TestFileInfoStruct(t *testing.T) {
-	// Test that FileInfo struct exists
-	info := FileInfo{}
-	_ = info
-}
-
-// TestArchiveStatsStruct verifies the ArchiveStats struct exists
-func TestArchiveStatsStruct(t *testing.T) {
-	// Test that ArchiveStats struct exists
-	stats := ArchiveStats{}
-	_ = stats
-}
-
-// mockValidator implements Validator interface for testing
-type mockValidator struct{}
-
-func (m *mockValidator) ValidatePath(path string) error {
-	return nil
-}
-
-func (m *mockValidator) ValidateFile(info FileInfo) error {
-	return nil
-}
-
-func (m *mockValidator) ValidateArchive(stats ArchiveStats) error {
-	return nil
-}
-
 // TestSizeValidator tests the SizeValidator functionality
 func TestSizeValidator(t *testing.T) {
 	// Test constructor

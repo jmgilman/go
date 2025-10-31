@@ -41,33 +41,11 @@ func NewTarGzArchiver() *TarGzArchiver {
 }
 
 // Archive creates an eStargz archive from the specified source directory.
-// The archive is created in eStargz format, which is fully backward compatible
-// with standard tar.gz but enables selective file extraction.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - sourceDir: Directory to archive (must exist and be readable)
-//   - output: Writer to receive the compressed archive data
-//
-// Returns an error if the source directory doesn't exist, is not readable,
-// or if writing to the output fails.
 func (a *TarGzArchiver) Archive(ctx context.Context, sourceDir string, output io.Writer) error {
 	return a.ArchiveWithProgress(ctx, sourceDir, output, nil)
 }
 
-// ArchiveWithProgress creates an eStargz archive from the specified source directory with progress reporting.
-// The archive is created using eStargz format with default compression level (gzip level 9).
-// eStargz provides the same compression as standard tar.gz while enabling selective extraction.
-// Uses concurrent file processing for improved performance.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - sourceDir: Directory to archive (must exist and be readable)
-//   - output: Writer to receive the compressed archive data
-//   - progress: Optional callback for progress reporting (current, total bytes)
-//
-// Returns an error if the source directory doesn't exist, is not readable,
-// or if writing to the output fails.
+// ArchiveWithProgress creates an eStargz archive with progress reporting.
 func (a *TarGzArchiver) ArchiveWithProgress(
 	ctx context.Context,
 	sourceDir string,
@@ -165,7 +143,7 @@ func (a *TarGzArchiver) archiveWithConcurrency(
 	}
 
 	// Determine optimal number of workers (based on CPU cores, but limit to reasonable number)
-	numWorkers := min(len(fileInfos), 8) // Use up to 8 workers
+	numWorkers := min(len(fileInfos), maxConcurrentWorkers)
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
@@ -287,18 +265,7 @@ func (a *TarGzArchiver) copyWithProgress(dst io.Writer, src io.Reader, progress 
 	return total, nil
 }
 
-// Extract expands a tar.gz archive to the specified target directory.
-// The extraction process includes security validation to prevent common
-// archive-based attacks such as path traversal and resource exhaustion.
-//
-// Parameters:
-//   - ctx: Context for cancellation
-//   - input: Reader providing the compressed archive data
-//   - targetDir: Directory to extract files to (created if it doesn't exist)
-//   - opts: Extraction options controlling security limits and behavior
-//
-// Returns an error if the archive is corrupted, contains security violations,
-// exceeds configured limits, or if file operations fail.
+// Extract expands a tar.gz archive to the specified target directory with security validation.
 func (a *TarGzArchiver) Extract(ctx context.Context, input io.Reader, targetDir string, opts ExtractOptions) error {
 	if input == nil {
 		return fmt.Errorf("input reader cannot be nil")
@@ -320,15 +287,11 @@ func (a *TarGzArchiver) Extract(ctx context.Context, input io.Reader, targetDir 
 		return fmt.Errorf("failed to create target directory: %w", mkErr)
 	}
 
-	validators := NewValidatorChain(
-		NewSizeValidator(opts.MaxFileSize, opts.MaxSize),
-		NewFileCountValidator(opts.MaxFiles),
-		NewPermissionSanitizer(),
-	)
+	validators := newDefaultValidatorChain(opts)
 
 	// Path traversal and symlink validation (internal validator)
 	pv := validatepkg.NewPathTraversalValidator()
-	pv.AllowHiddenFiles = false
+	pv.AllowHiddenFiles = opts.AllowHiddenFiles
 	pv.RootPath = targetDir
 
 	totalSize := int64(0)

@@ -31,13 +31,13 @@ func TestHTTPRangeListFiles(t *testing.T) {
 	// Create test data with enough files to make bandwidth savings meaningful
 	sourceDir := t.TempDir()
 	testFiles := map[string]string{
-		"config.json":            `{"app":"test","version":"1.0"}`,
-		"readme.md":              "# README\n\nThis is a test application",
-		"data/users.json":        `[{"name":"Alice"},{"name":"Bob"}]`,
-		"data/products.json":     `[{"id":1,"name":"Widget"}]`,
-		"src/main.go":            "package main\n\nfunc main() {}",
-		"src/utils/helpers.go":   "package utils\n\nfunc Helper() {}",
-		"docs/api.md":            "# API Documentation",
+		"config.json":               `{"app":"test","version":"1.0"}`,
+		"readme.md":                 "# README\n\nThis is a test application",
+		"data/users.json":           `[{"name":"Alice"},{"name":"Bob"}]`,
+		"data/products.json":        `[{"id":1,"name":"Widget"}]`,
+		"src/main.go":               "package main\n\nfunc main() {}",
+		"src/utils/helpers.go":      "package utils\n\nfunc Helper() {}",
+		"docs/api.md":               "# API Documentation",
 		"tests/integration_test.go": "package tests",
 	}
 
@@ -119,16 +119,16 @@ func TestHTTPRangeSelectiveExtraction(t *testing.T) {
 	// Create test data with various file types
 	sourceDir := t.TempDir()
 	testFiles := map[string]string{
-		"app.json":              `{"name":"app"}`,
-		"config.yaml":           "version: 1.0",
-		"main.go":               "package main",
-		"utils.go":              "package utils",
-		"test.go":               "package test",
-		"data/file1.json":       `{"data":1}`,
-		"data/file2.json":       `{"data":2}`,
-		"data/file3.txt":        "text file",
-		"docs/readme.md":        "# Docs",
-		"scripts/deploy.sh":     "#!/bin/bash",
+		"app.json":          `{"name":"app"}`,
+		"config.yaml":       "version: 1.0",
+		"main.go":           "package main",
+		"utils.go":          "package utils",
+		"test.go":           "package test",
+		"data/file1.json":   `{"data":1}`,
+		"data/file2.json":   `{"data":2}`,
+		"data/file3.txt":    "text file",
+		"docs/readme.md":    "# Docs",
+		"scripts/deploy.sh": "#!/bin/bash",
 	}
 
 	for path, content := range testFiles {

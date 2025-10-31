@@ -380,74 +380,8 @@ func WithPullCacheBypass(bypass bool) PullOption {
 }
 
 // WithFilesToExtract specifies glob patterns for selective file extraction.
-// Only files matching at least one pattern will be extracted from the archive.
-// This enables bandwidth savings when used with eStargz archives and HTTP Range requests.
-//
-// Supported glob patterns:
-//   - "*.json" - matches all .json files in the root directory
-//   - "config/*" - matches all files directly in the config directory
-//   - "data/**/*.txt" - matches all .txt files in data and all subdirectories
-//   - "bin/app" - matches exact file path
-//
-// WithFilesToExtract configures selective file extraction using glob patterns.
-// When specified, only files matching at least one of the provided patterns will
-// be extracted from the archive. This saves disk I/O and CPU time when you only
-// need a subset of files from a large bundle.
-//
-// Glob pattern syntax:
-//   - "*" matches any sequence of characters (excluding directory separator)
-//   - "?" matches any single character (excluding directory separator)
-//   - "**" matches any sequence of characters (including directory separators)
-//   - Character ranges like [a-z] and [0-9] are supported
-//
-// Pattern examples:
-//   - "*.json" - matches all .json files in the root directory only
-//   - "config.json" - matches only the specific file config.json in root
-//   - "config/*" - matches all files directly under config/ directory
-//   - "**/*.json" - matches all .json files recursively in any directory
-//   - "data/**/*.txt" - matches all .txt files under data/ and its subdirectories
-//   - "src/**/*.go" - matches all .go files under src/ and subdirectories
-//
-// Multiple patterns can be provided, and a file will be extracted if it matches
-// ANY of the patterns (logical OR).
-//
-// Security notes:
-//   - All security validators still apply to matched files
-//   - Size limits, file count limits, and path traversal checks are enforced
-//   - Directories needed for matched files are created automatically
-//   - Non-matching files are completely skipped (not counted toward limits)
-//
-// Performance:
-//   - Current implementation downloads the full archive but skips non-matching files
-//   - Saves disk I/O: non-matching files are never written to disk
-//   - Saves CPU: non-matching files are not decompressed or validated
-//   - Future: HTTP Range requests will minimize bandwidth usage
-//
-// Example - Extract only JSON configuration files:
-//
-//	err := client.Pull(ctx, ref, targetDir,
-//	    ocibundle.WithFilesToExtract("**/*.json"),
-//	)
-//
-// Example - Extract configuration and data files:
-//
-//	err := client.Pull(ctx, ref, targetDir,
-//	    ocibundle.WithFilesToExtract("config.json", "data/*.json", "secrets/*.yaml"),
-//	)
-//
-// Example - Extract all source code:
-//
-//	err := client.Pull(ctx, ref, targetDir,
-//	    ocibundle.WithFilesToExtract("**/*.go", "**/*.mod", "**/*.sum"),
-//	)
-//
-// Example - Extract with security limits:
-//
-//	err := client.Pull(ctx, ref, targetDir,
-//	    ocibundle.WithFilesToExtract("**/*.json"),
-//	    ocibundle.WithMaxSize(10*1024*1024),  // 10MB total
-//	    ocibundle.WithMaxFiles(100),          // Max 100 files
-//	)
+// Only files matching at least one pattern will be extracted.
+// Supports: *.ext, dir/*, **/file.ext patterns.
 func WithFilesToExtract(patterns ...string) PullOption {
 	return func(opts *PullOptions) {
 		opts.FilesToExtract = patterns

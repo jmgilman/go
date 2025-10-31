@@ -23,15 +23,6 @@ import (
 )
 
 // testBlobRangeSupport checks if a registry blob URL supports HTTP Range requests.
-// It sends a minimal Range request and checks for a 206 Partial Content response.
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeout
-//   - httpClient: HTTP client to use for the request
-//   - blobURL: Full URL to the blob (e.g., http://registry/v2/repo/blobs/sha256:...)
-//
-// Returns true if the registry supports Range requests, false otherwise.
-// Errors are treated as "not supported" and return false.
 func testBlobRangeSupport(ctx context.Context, httpClient *http.Client, blobURL string) bool {
 	// Create request with Range header for first byte
 	req, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
@@ -57,26 +48,11 @@ func testBlobRangeSupport(ctx context.Context, httpClient *http.Client, blobURL 
 }
 
 // newHTTPRangeSeeker creates an HTTP Range request seeker for a blob URL.
-// This allows random access to blob content via HTTP Range requests.
-//
-// Parameters:
-//   - httpClient: HTTP client to use for requests
-//   - blobURL: Full URL to the blob
-//
-// Returns an io.ReadSeekCloser that fetches data on-demand via Range requests.
 func newHTTPRangeSeeker(httpClient *http.Client, blobURL string) io.ReadSeekCloser {
 	return transport.NewHTTPReadSeeker(httpClient, blobURL, nil)
 }
 
 // buildBlobURL constructs the OCI blob URL for a given registry, repository, and digest.
-// Format: {registryURL}/v2/{repository}/blobs/{digest}
-//
-// Parameters:
-//   - registryURL: Base registry URL (e.g., "http://localhost:5000")
-//   - repository: Repository name (e.g., "myorg/myrepo")
-//   - digest: Content digest (e.g., "sha256:abc123...")
-//
-// Returns the complete blob URL.
 func buildBlobURL(registryURL, repository, digest string) string {
 	// Ensure registryURL doesn't end with /
 	registryURL = strings.TrimRight(registryURL, "/")
@@ -90,64 +66,8 @@ func buildBlobURL(registryURL, repository, digest string) string {
 	return fmt.Sprintf("%s/v2/%s/blobs/%s", registryURL, repository, digest)
 }
 
-// parseReference splits an OCI reference into registry URL and repository path.
-// Handles formats like:
-//   - localhost:5000/repo:tag → ("http://localhost:5000", "repo")
-//   - ghcr.io/org/repo:tag → ("https://ghcr.io", "org/repo")
-//   - registry.example.com/path/to/repo@sha256:abc → ("https://registry.example.com", "path/to/repo")
-//
-// Parameters:
-//   - reference: Full OCI reference
-//   - allowHTTP: Whether to use HTTP for localhost registries
-//
-// Returns registry URL and repository path.
-func parseReference(reference string, allowHTTP bool) (registryURL, repository string) {
-	// Remove tag or digest from reference
-	refWithoutTag := reference
-	if idx := strings.LastIndex(reference, ":"); idx != -1 {
-		// Check if this is a port or a tag
-		after := reference[idx+1:]
-		if !strings.Contains(after, "/") {
-			// It's a tag or digest, remove it
-			refWithoutTag = reference[:idx]
-		}
-	}
-	if idx := strings.LastIndex(refWithoutTag, "@"); idx != -1 {
-		refWithoutTag = refWithoutTag[:idx]
-	}
-
-	// Split into registry and repository
-	parts := strings.SplitN(refWithoutTag, "/", 2)
-	if len(parts) == 1 {
-		// No slash, assume Docker Hub (but we shouldn't get here in practice)
-		return "https://index.docker.io", parts[0]
-	}
-
-	registryHost := parts[0]
-	repository = parts[1]
-
-	// Determine protocol
-	protocol := "https"
-	if allowHTTP || strings.HasPrefix(registryHost, "localhost") || strings.Contains(registryHost, "localhost:") {
-		protocol = "http"
-	}
-
-	registryURL = fmt.Sprintf("%s://%s", protocol, registryHost)
-	return registryURL, repository
-}
-
 // getBlobURLFromRepository extracts the HTTP client and constructs the blob URL
-// from an ORAS repository and digest. This enables HTTP Range requests using the
-// repository's authenticated HTTP client.
-//
-// Parameters:
-//   - repo: ORAS repository with authentication configured
-//   - digest: Content digest (e.g., "sha256:abc123...")
-//
-// Returns:
-//   - blobURL: Full URL to the blob for HTTP Range requests
-//   - httpClient: Authenticated HTTP client from the repository
-//   - error: If client extraction or URL construction fails
+// from an ORAS repository and digest for HTTP Range requests.
 func getBlobURLFromRepository(repo *remote.Repository, digest string) (string, *http.Client, error) {
 	// Extract HTTP client from repository
 	// The repo.Client is an auth.Client interface, we need to access the underlying *http.Client
@@ -212,7 +132,7 @@ func extractTOCFromBlob(
 
 	// Step 2: Download footer (last 100 bytes should be sufficient)
 	// The footer is small and contains the TOC offset
-	footerSize := int64(100)
+	footerSize := int64(footerSizeBytes)
 	if footerSize > blobSize {
 		footerSize = blobSize // Handle very small blobs
 	}
@@ -378,20 +298,6 @@ func parseTOCFromRangeBytes(tocData []byte, footerData []byte, tocOffset int64, 
 	return entries, nil
 }
 
-// collectTOCEntries recursively collects all TOC entries from the tree structure.
-func collectTOCEntries(entry *estargz.TOCEntry, entries *[]*estargz.TOCEntry) {
-	// Add this entry if it's not the root
-	if entry.Name != "" {
-		*entries = append(*entries, entry)
-	}
-
-	// Recursively collect children
-	entry.ForeachChild(func(_ string, child *estargz.TOCEntry) bool {
-		collectTOCEntries(child, entries)
-		return true
-	})
-}
-
 // readerAtFromSeeker adapts an io.ReadSeeker to io.ReaderAt interface.
 // This is thread-safe and serializes ReadAt calls with a mutex since
 // each ReadAt performs a Seek followed by a Read which could conflict
@@ -467,11 +373,7 @@ func extractSelectiveFromStargz(
 	}
 
 	// Create validators
-	validators := NewValidatorChain(
-		NewSizeValidator(opts.MaxFileSize, opts.MaxSize),
-		NewFileCountValidator(opts.MaxFiles),
-		NewPermissionSanitizer(),
-	)
+	validators := newDefaultValidatorChain(opts)
 
 	// Track statistics
 	var totalSize int64
@@ -489,11 +391,8 @@ func extractSelectiveFromStargz(
 	// Walk all entries in the TOC
 	var collectEntries func(entry *estargz.TOCEntry) error
 	collectEntries = func(entry *estargz.TOCEntry) error {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("extraction canceled: %w", ctx.Err())
-		default:
+		if err := isDone(ctx, "extraction"); err != nil {
+			return err
 		}
 
 		entryName := entry.Name
@@ -545,11 +444,8 @@ func extractSelectiveFromStargz(
 
 	// Now extract the collected files
 	for _, entryName := range filesToExtract {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("extraction canceled: %w", ctx.Err())
-		default:
+		if err := isDone(ctx, "extraction"); err != nil {
+			return err
 		}
 
 		// Lookup the entry

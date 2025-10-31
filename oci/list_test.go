@@ -71,10 +71,10 @@ func TestListFilesWithFilter(t *testing.T) {
 	// Create test files
 	sourceDir := t.TempDir()
 	testFiles := map[string]string{
-		"config.json":       `{"app":"test"}`,
-		"data/file1.json":   `{"data":1}`,
-		"data/file2.txt":    "text content",
-		"src/main.go":       "package main",
+		"config.json":        `{"app":"test"}`,
+		"data/file1.json":    `{"data":1}`,
+		"data/file2.txt":     "text content",
+		"src/main.go":        "package main",
 		"src/util/helper.go": "package util",
 	}
 
@@ -254,9 +254,9 @@ func TestListFilesResult(t *testing.T) {
 			{Name: "file2.txt", Size: 200, IsDir: false},
 			{Name: "dir1", Size: 0, IsDir: true},
 		},
-		TotalSize:  300,
-		FileCount:  2,
-		DirCount:   1,
+		TotalSize: 300,
+		FileCount: 2,
+		DirCount:  1,
 	}
 
 	assert.Len(t, result.Files, 3)

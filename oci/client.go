@@ -1,12 +1,8 @@
-// Package ocibundle provides OCI bundle distribution functionality.
-// This file contains the main client interface and implementation.
 package ocibundle
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -23,8 +19,26 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 
 	"github.com/jmgilman/go/oci/internal/cache"
-	"github.com/jmgilman/go/oci/internal/oras"
+	orasint "github.com/jmgilman/go/oci/internal/oras"
 )
+
+const (
+	// maxConcurrentWorkers is the maximum number of concurrent workers for archiving operations.
+	maxConcurrentWorkers = 8
+	// footerSizeBytes is the size of the eStargz footer in bytes (sufficient for TOC offset).
+	footerSizeBytes = 100
+)
+
+// validatePullInputs validates inputs for pull operations.
+func validatePullInputs(reference, targetDir string) error {
+	if reference == "" {
+		return fmt.Errorf("reference cannot be empty")
+	}
+	if targetDir == "" {
+		return fmt.Errorf("target directory cannot be empty")
+	}
+	return nil
+}
 
 // Client provides OCI bundle operations using ORAS for registry communication.
 // The client is safe for concurrent use and isolates ORAS dependencies in internal packages.
@@ -33,10 +47,13 @@ type Client struct {
 	options *ClientOptions
 
 	// orasClient provides ORAS operations (injected for testability)
-	orasClient oras.Client
+	orasClient orasint.Client
 
 	// cache provides caching functionality for OCI operations
 	cache cache.Cache
+
+	// cacheOnce ensures cache is initialized only once
+	cacheOnce sync.Once
 
 	// mu protects concurrent access to client operations
 	mu sync.RWMutex
@@ -75,15 +92,15 @@ func NewWithOptions(opts ...ClientOption) (*Client, error) {
 	// Use provided ORAS client or default to real implementation
 	orasClient := options.ORASClient
 	if orasClient == nil {
-		orasClient = &oras.DefaultORASClient{}
+		orasClient = &orasint.DefaultORASClient{}
 	}
 
 	// Convert public HTTPConfig to internal AuthOptions format
 	if options.HTTPConfig != nil {
 		if options.Auth == nil {
-			options.Auth = &oras.AuthOptions{}
+			options.Auth = &orasint.AuthOptions{}
 		}
-		options.Auth.HTTPConfig = &oras.HTTPConfig{
+		options.Auth.HTTPConfig = &orasint.HTTPConfig{
 			AllowHTTP:     options.HTTPConfig.AllowHTTP,
 			AllowInsecure: options.HTTPConfig.AllowInsecure,
 			Registries:    options.HTTPConfig.Registries,
@@ -105,12 +122,6 @@ func NewWithOptions(opts ...ClientOption) (*Client, error) {
 }
 
 // validateClientOptions validates the client options for correctness.
-// It checks for invalid combinations and missing required values.
-//
-// Parameters:
-//   - opts: The client options to validate
-//
-// Returns an error if validation fails, nil if options are valid.
 func validateClientOptions(opts *ClientOptions) error {
 	if opts == nil {
 		return fmt.Errorf("client options cannot be nil")
@@ -135,18 +146,9 @@ func validateClientOptions(opts *ClientOptions) error {
 }
 
 // createRepository creates an ORAS repository with authentication configured.
-// This is an internal method that applies the client's auth options to repository creation.
-//
-// Parameters:
-//   - ctx: Context for the operation
-//   - reference: Full OCI reference (e.g., "ghcr.io/org/repo:tag")
-//
-// Returns:
-//   - Configured ORAS repository ready for operations
-//   - Error if repository creation fails
 func (c *Client) createRepository(ctx context.Context, reference string) (*remote.Repository, error) {
 	// Note: mutex is already held by caller, so we don't need to lock here
-	repo, err := oras.NewRepository(ctx, reference, c.options.Auth)
+	repo, err := orasint.NewRepository(ctx, reference, c.options.Auth)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create repository for %s: %w", reference, err)
 	}
@@ -158,14 +160,12 @@ func retryOperation(ctx context.Context, maxRetries int, delay time.Duration, op
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("context cancelled during retry operation: %w", ctx.Err())
-		default:
+		if err := isDone(ctx, "retry operation"); err != nil {
+			return err
 		}
 
 		if attempt > 0 {
-			// Exponential backoff
+			// Exponential backoff: delay * 2^(attempt-1)
 			backoffDelay := delay * time.Duration(1<<(attempt-1))
 			time.Sleep(backoffDelay)
 		}
@@ -188,23 +188,25 @@ func retryOperation(ctx context.Context, maxRetries int, delay time.Duration, op
 
 // isRetryableError determines if an error should trigger a retry
 func isRetryableError(err error) bool {
-	// Network errors
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
+	// Don't retry if context was canceled
+	if errors.Is(err, context.Canceled) {
+		return false
 	}
 
-	// Connection errors
+	// Retry on deadline exceeded
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 
-	// Registry-specific temporary errors (5xx status codes)
+	// Check for network errors with Temporary() method
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Temporary() {
+		return true
+	}
+
+	// String matching as fallback for errors that don't expose proper types
 	errStr := err.Error()
-	return errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) ||
-		// Check for common temporary error patterns
-		strings.Contains(errStr, "connection refused") ||
+	return strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "timeout") ||
 		strings.Contains(errStr, "temporary failure") ||
@@ -213,16 +215,6 @@ func isRetryableError(err error) bool {
 }
 
 // Push uploads a directory as an OCI artifact to the specified reference.
-// It archives the source directory and pushes it to the OCI registry with the given options.
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeouts
-//   - sourceDir: Path to directory to upload (must exist and be readable)
-//   - reference: OCI reference (e.g., "ghcr.io/org/repo:tag")
-//   - opts: Optional push options for annotations, platform, and progress reporting
-//
-// Returns:
-//   - Error if the operation fails
 func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...PushOption) error {
 	// Thread safety: use read lock since we're only reading options
 	c.mu.RLock()
@@ -303,7 +295,7 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 			}
 		}
 		// Recreate descriptor to ensure fresh reader for each attempt
-		desc := &oras.PushDescriptor{
+		desc := &orasint.PushDescriptor{
 			MediaType:   archiver.MediaType(),
 			Data:        tempFile,
 			Size:        stat.Size(),
@@ -322,58 +314,7 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 }
 
 // Pull downloads and extracts an OCI artifact to the specified directory.
-// It downloads the artifact from the OCI registry and extracts it with security validation.
-//
-// The method supports both full extraction (default) and selective file extraction using
-// glob patterns. When selective extraction is used, only files matching the specified
-// patterns are extracted, saving disk I/O and CPU time.
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeouts
-//   - reference: OCI reference to download (e.g., "ghcr.io/org/repo:tag")
-//   - targetDir: Directory to extract the artifact to (created if it doesn't exist)
-//   - opts: Optional pull options for security limits and selective extraction
-//
-// Returns:
-//   - Error if the operation fails
-//
-// Example - Full extraction:
-//
-//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle")
-//
-// Example - Extract only JSON files:
-//
-//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle",
-//	    ocibundle.WithFilesToExtract("**/*.json"),
-//	)
-//
-// Example - Extract multiple patterns:
-//
-//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle",
-//	    ocibundle.WithFilesToExtract("config.json", "data/*.json", "**/*.yaml"),
-//	)
-//
-// Example - With security limits:
-//
-//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle",
-//	    ocibundle.WithMaxSize(100*1024*1024),    // 100MB total
-//	    ocibundle.WithMaxFileSize(10*1024*1024), // 10MB per file
-//	    ocibundle.WithMaxFiles(1000),            // Max 1000 files
-//	)
-//
-// Supported glob patterns:
-//   - "*.json" - all .json files in root directory
-//   - "config/*" - all files in config directory
-//   - "**/*.txt" - all .txt files recursively
-//   - "data/**/*.json" - all .json files under data/ and subdirectories
-//
-// Security features:
-//   - Path traversal prevention (blocks ../../../etc/passwd)
-//   - Size limits (per-file and total)
-//   - File count limits
-//   - Permission sanitization (removes setuid/setgid bits)
-//
-// All archives are in eStargz format, which is 100% compatible with standard tar.gz.
+// Supports selective extraction using glob patterns and enforces security validation.
 func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...PullOption) error {
 	// Thread safety: use read lock since we're only reading options
 	c.mu.RLock()
@@ -415,7 +356,7 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 	}
 
 	// Pull the artifact with retry logic
-	var descriptor *oras.PullDescriptor
+	var descriptor *orasint.PullDescriptor
 	pullErr := retryOperation(ctx, pullOpts.MaxRetries, pullOpts.RetryDelay, func() error {
 		var err error
 		descriptor, err = c.orasClient.Pull(ctx, reference, c.options.Auth)
@@ -433,12 +374,13 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 
 	// Create extract options from pull options
 	extractOpts := ExtractOptions{
-		MaxFiles:       pullOpts.MaxFiles,
-		MaxSize:        pullOpts.MaxSize,
-		MaxFileSize:    pullOpts.MaxFileSize,
-		StripPrefix:    pullOpts.StripPrefix,
-		PreservePerms:  pullOpts.PreservePermissions,
-		FilesToExtract: pullOpts.FilesToExtract,
+		MaxFiles:         pullOpts.MaxFiles,
+		MaxSize:          pullOpts.MaxSize,
+		MaxFileSize:      pullOpts.MaxFileSize,
+		AllowHiddenFiles: pullOpts.AllowHiddenFiles,
+		StripPrefix:      pullOpts.StripPrefix,
+		PreservePerms:    pullOpts.PreservePermissions,
+		FilesToExtract:   pullOpts.FilesToExtract,
 	}
 
 	// Decision tree for extraction strategy
@@ -519,24 +461,7 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 	return nil
 }
 
-// PullWithCache downloads and extracts an OCI artifact to the specified directory
-// with intelligent caching to improve performance on repeated pulls.
-// This method enhances the regular Pull method with caching capabilities.
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeouts
-//   - reference: OCI reference to download (e.g., "ghcr.io/org/repo:tag")
-//   - targetDir: Directory to extract the artifact to (created if it doesn't exist)
-//   - opts: Optional pull options for security limits, behavior, and cache control
-//
-// Returns:
-//   - Error if the operation fails
-//
-// The method will:
-// 1. Check if caching is enabled and appropriate for the operation
-// 2. Attempt to serve from cache if available and not bypassed
-// 3. Fall back to network pull if cache miss or bypass requested
-// 4. Cache the result for future pulls if caching is enabled
+// PullWithCache downloads and extracts an OCI artifact with caching support.
 func (c *Client) PullWithCache(ctx context.Context, reference, targetDir string, opts ...PullOption) error {
 	// Thread safety: use read lock since we're only reading options
 	c.mu.RLock()
@@ -549,12 +474,8 @@ func (c *Client) PullWithCache(ctx context.Context, reference, targetDir string,
 	}
 
 	// Validate inputs
-	if reference == "" {
-		return fmt.Errorf("reference cannot be empty")
-	}
-
-	if targetDir == "" {
-		return fmt.Errorf("target directory cannot be empty")
+	if err := validatePullInputs(reference, targetDir); err != nil {
+		return err
 	}
 
 	// Check if caching is enabled and should be used for this operation
@@ -571,26 +492,32 @@ func (c *Client) PullWithCache(ctx context.Context, reference, targetDir string,
 		return c.Pull(ctx, reference, targetDir, opts...)
 	}
 
-	// Try to get from cache first
-	cacheKey := c.generateCacheKey(reference)
+	// Step 1: Resolve tag to digest (with caching)
+	digest, err := c.resolveTagWithCache(ctx, reference)
+	if err != nil {
+		// Failed to resolve - fall back to regular pull
+		// This shouldn't fail in normal operation, but gracefully degrade
+		return c.Pull(ctx, reference, targetDir, opts...)
+	}
+
+	// Step 2: Generate cache key from immutable digest
+	cacheKey := c.generateCacheKey(digest)
+
+	// Step 3: Try to get from cache first
 	if err := c.getFromCache(ctx, cacheKey, targetDir); err == nil {
-		// Successfully served from cache
+		// Successfully served from cache - no network access needed!
 		return nil
 	}
 	// Cache miss or error - proceed with network pull
 
-	// Perform the network pull
+	// Step 4: Perform network pull (will cache blob during download in future)
+	// TODO: Implement blob caching during download using tee pattern (Phase 3)
 	if err := c.Pull(ctx, reference, targetDir, opts...); err != nil {
 		return err
 	}
 
-	// Cache the result for future use
-	// Note: We cache after successful extraction to ensure data integrity
-	if err := c.storeInCache(ctx, cacheKey, targetDir); err != nil {
-		// Don't fail the operation if caching fails, just log the error
-		// The pull was successful, caching is a performance optimization
-		return nil
-	}
+	// Note: Blob caching will be done during Pull() in Phase 3
+	// For now, blob is not cached (but tag→digest mapping is cached)
 
 	return nil
 }
@@ -620,50 +547,119 @@ func (c *Client) isCachingEnabledForPull(opts *PullOptions) bool {
 	}
 }
 
-// ensureCacheInitialized ensures the cache is properly initialized
+// ensureCacheInitialized ensures the cache is properly initialized using sync.Once
+// for thread-safe initialization.
 func (c *Client) ensureCacheInitialized(ctx context.Context) error {
-	if c.cache != nil {
-		return nil
+	var initErr error
+
+	c.cacheOnce.Do(func() {
+		if c.options.CacheConfig == nil || c.options.CacheConfig.Coordinator == nil {
+			initErr = fmt.Errorf("cache not configured")
+			return
+		}
+
+		// Initialize cache with the configured coordinator
+		c.cache = c.options.CacheConfig.Coordinator
+	})
+
+	return initErr
+}
+
+// generateCacheKey creates a unique cache key from a content digest.
+// Uses digest-based keys for immutability (tags are mutable, digests are not).
+func (c *Client) generateCacheKey(digest string) string {
+	return fmt.Sprintf("blob:%s", digest)
+}
+
+// resolveTagWithCache resolves a tag or reference to its digest, using cache when possible.
+func (c *Client) resolveTagWithCache(ctx context.Context, reference string) (string, error) {
+	// If reference is already a digest, return it directly
+	if strings.Contains(reference, "@sha256:") || strings.Contains(reference, "@sha512:") {
+		// Extract digest from reference like "repo@sha256:abc"
+		parts := strings.SplitN(reference, "@", 2)
+		if len(parts) == 2 {
+			return parts[1], nil
+		}
 	}
 
-	if c.options.CacheConfig == nil || c.options.CacheConfig.Coordinator == nil {
+	// Cast cache to Coordinator to access tag mapping methods
+	coordinator, ok := c.cache.(*cache.Coordinator)
+	if !ok {
+		// Cache is not a Coordinator - can't use tag caching
+		// Fall back to direct resolution
+		return c.resolveTagDirect(ctx, reference)
+	}
+
+	// Check tag cache first
+	mapping, err := coordinator.GetTagMapping(ctx, reference)
+	if err == nil && mapping != nil {
+		// Cache hit - return cached digest
+		return mapping.Digest, nil
+	}
+
+	// Cache miss - need to query registry to resolve tag
+	digest, err := c.resolveTagDirect(ctx, reference)
+	if err != nil {
+		return "", err
+	}
+
+	// Cache the tag→digest mapping for future use
+	if cacheErr := coordinator.PutTagMapping(ctx, reference, digest); cacheErr != nil {
+		// Don't fail if caching fails - resolution succeeded
+		// Just log the error (in production, would use proper logging)
+	}
+
+	return digest, nil
+}
+
+// resolveTagDirect queries the registry to resolve a tag to a digest without caching.
+func (c *Client) resolveTagDirect(ctx context.Context, reference string) (string, error) {
+	// Use the internal ORAS client to pull and get the digest
+	// This is a lightweight operation that just fetches the manifest
+	descriptor, err := c.orasClient.Pull(ctx, reference, c.options.Auth)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve tag: %w", err)
+	}
+	defer descriptor.Data.Close()
+
+	// The descriptor includes the digest
+	return descriptor.Digest, nil
+}
+
+// getFromCache attempts to retrieve and extract from cache.
+// Returns nil on success, error on cache miss or extraction failure.
+func (c *Client) getFromCache(ctx context.Context, cacheKey, targetDir string) error {
+	if c.cache == nil {
 		return fmt.Errorf("cache not configured")
 	}
 
-	// Initialize cache with the configured coordinator
-	c.cache = c.options.CacheConfig.Coordinator
+	coordinator, ok := c.cache.(*cache.Coordinator)
+	if !ok {
+		return fmt.Errorf("cache is not a coordinator")
+	}
+
+	// Extract digest from cache key (format: "blob:sha256:abc...")
+	digest := strings.TrimPrefix(cacheKey, "blob:")
+
+	// Try to get cached blob
+	blobReader, err := coordinator.GetBlob(ctx, digest)
+	if err != nil {
+		return fmt.Errorf("cache miss: %w", err)
+	}
+	defer blobReader.Close()
+
+	// Create archiver for extraction
+	archiver := NewTarGzArchiverWithFS(c.options.FS)
+
+	// Extract cached blob to target directory with default options
+	extractOpts := ExtractOptions{
+		PreservePerms: true,
+	}
+	if err := c.extractAtomically(ctx, archiver, blobReader, targetDir, extractOpts); err != nil {
+		return fmt.Errorf("failed to extract cached blob: %w", err)
+	}
+
 	return nil
-}
-
-// generateCacheKey creates a unique cache key for the given reference
-func (c *Client) generateCacheKey(reference string) string {
-	// Use SHA256 hash of the reference for consistent cache keys
-	// This ensures the same reference always maps to the same cache key
-	return fmt.Sprintf("pull:%s", reference)
-}
-
-// getFromCache attempts to retrieve and extract from cache
-func (c *Client) getFromCache(ctx context.Context, cacheKey, targetDir string) error {
-	// This is a placeholder implementation
-	// In a full implementation, this would:
-	// 1. Check if cache entry exists
-	// 2. Verify cache entry integrity
-	// 3. Extract cached data to target directory
-	// 4. Update cache access statistics
-
-	return fmt.Errorf("cache miss: not implemented")
-}
-
-// storeInCache stores the extracted directory in the cache
-func (c *Client) storeInCache(ctx context.Context, cacheKey, sourceDir string) error {
-	// This is a placeholder implementation
-	// In a full implementation, this would:
-	// 1. Create a new cache entry
-	// 2. Archive the directory contents
-	// 3. Store the archive in cache with metadata
-	// 4. Update cache statistics
-
-	return fmt.Errorf("cache storage: not implemented")
 }
 
 // extractAtomically performs atomic extraction with rollback on failure
@@ -745,50 +741,38 @@ func (c *Client) moveFiles(srcDir, dstDir string) error {
 }
 
 // removeAllFS removes a directory tree using the filesystem (best-effort).
+// This is a best-effort cleanup operation that ignores errors from individual
+// file/directory removals, as some may fail due to permissions or concurrent access.
 func (c *Client) removeAllFS(root string) error {
-	// Simple recursive delete using Walk in reverse order: files before dirs.
+	// Check if filesystem supports RemoveAll directly
+	if remover, ok := c.options.FS.(interface {
+		RemoveAll(path string) error
+	}); ok {
+		return remover.RemoveAll(root)
+	}
+
+	// Fallback: Simple recursive delete using Walk in reverse order: files before dirs.
 	var toDelete []string
 	_ = c.options.FS.Walk(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil // Ignore individual walk errors
 		}
 		toDelete = append(toDelete, path)
 		return nil
 	})
-	// delete deepest paths first
+	// Delete deepest paths first
 	for i := len(toDelete) - 1; i >= 0; i-- {
-		_ = c.options.FS.Remove(toDelete[i])
+		_ = c.options.FS.Remove(toDelete[i]) // Ignore individual removal errors (best-effort)
 	}
 	return nil
 }
 
 // createTempDir creates a unique temporary directory using TempFS interface if available,
-// otherwise creates a unique directory with the given pattern in the OS temp directory.
+// otherwise uses os.MkdirTemp for automatic unique naming.
 func (c *Client) createTempDir(pattern string) (string, error) {
 	if tfs, ok := c.options.FS.(core.TempFS); ok {
 		return tfs.TempDir("", pattern)
 	}
-	// Fallback: create a unique directory manually
-	// Try multiple times to handle concurrent conflicts
-	for i := 0; i < 10; i++ {
-		// Generate unique name using hash of PID and iteration
-		randomBytes := make([]byte, 8)
-		hasher := sha256.New()
-		hasher.Write([]byte(fmt.Sprintf("%s-%d-%d", pattern, os.Getpid(), i)))
-		hasher.Write([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
-		copy(randomBytes, hasher.Sum(nil))
-		uniqueName := pattern + hex.EncodeToString(randomBytes)
-		path := filepath.Join(os.TempDir(), uniqueName)
-
-		// Try to create the directory
-		err := c.options.FS.MkdirAll(path, 0755)
-		if err == nil {
-			return path, nil
-		}
-		// If directory already exists, try again with different name
-		if !os.IsExist(err) {
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("failed to create unique temp directory after 10 attempts")
+	// Fallback: use os.MkdirTemp which handles uniqueness automatically
+	return os.MkdirTemp("", pattern)
 }

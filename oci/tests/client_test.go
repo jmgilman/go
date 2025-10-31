@@ -613,14 +613,14 @@ func TestClient_SelectiveExtraction(t *testing.T) {
 	// Create test data with various files
 	sourceDir := t.TempDir()
 	testFiles := map[string]string{
-		"config.json":           `{"app":"test"}`,
-		"readme.txt":            "README content",
-		"data/file1.json":       `{"data":1}`,
-		"data/file2.txt":        "Data 2",
-		"data/sub/file3.json":   `{"data":3}`,
-		"src/main.go":           "package main",
-		"src/util/helper.go":    "package util",
-		"test/main_test.go":     "package main",
+		"config.json":         `{"app":"test"}`,
+		"readme.txt":          "README content",
+		"data/file1.json":     `{"data":1}`,
+		"data/file2.txt":      "Data 2",
+		"data/sub/file3.json": `{"data":3}`,
+		"src/main.go":         "package main",
+		"src/util/helper.go":  "package util",
+		"test/main_test.go":   "package main",
 	}
 
 	for path, content := range testFiles {

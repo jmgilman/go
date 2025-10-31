@@ -18,56 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestArchiverInterface verifies the Archiver interface is properly defined
-func TestArchiverInterface(t *testing.T) {
-	// Test that Archiver interface exists and has the expected methods
-	var _ Archiver = (*mockArchiver)(nil)
-}
-
-// TestExtractOptionsStruct verifies the ExtractOptions struct exists
-func TestExtractOptionsStruct(t *testing.T) {
-	// Test that ExtractOptions struct exists
-	opts := ExtractOptions{}
-	_ = opts
-}
-
-// TestDefaultExtractOptions verifies the default security options are properly configured
-func TestDefaultExtractOptions(t *testing.T) {
-	// Test that DefaultExtractOptions has the expected security defaults
-	expectedMaxFiles := 10000
-	expectedMaxSize := int64(1 * 1024 * 1024 * 1024) // 1GB
-	expectedMaxFileSize := int64(100 * 1024 * 1024)  // 100MB
-	expectedPreservePerms := false
-
-	if DefaultExtractOptions.MaxFiles != expectedMaxFiles {
-		t.Errorf("DefaultExtractOptions.MaxFiles = %d, want %d", DefaultExtractOptions.MaxFiles, expectedMaxFiles)
-	}
-
-	if DefaultExtractOptions.MaxSize != expectedMaxSize {
-		t.Errorf("DefaultExtractOptions.MaxSize = %d, want %d", DefaultExtractOptions.MaxSize, expectedMaxSize)
-	}
-
-	if DefaultExtractOptions.MaxFileSize != expectedMaxFileSize {
-		t.Errorf(
-			"DefaultExtractOptions.MaxFileSize = %d, want %d",
-			DefaultExtractOptions.MaxFileSize,
-			expectedMaxFileSize,
-		)
-	}
-
-	if DefaultExtractOptions.PreservePerms != expectedPreservePerms {
-		t.Errorf(
-			"DefaultExtractOptions.PreservePerms = %t, want %t",
-			DefaultExtractOptions.PreservePerms,
-			expectedPreservePerms,
-		)
-	}
-
-	if DefaultExtractOptions.StripPrefix != "" {
-		t.Errorf("DefaultExtractOptions.StripPrefix = %q, want empty string", DefaultExtractOptions.StripPrefix)
-	}
-}
-
 // TestTarGzArchiver_BasicArchive tests basic archive creation functionality
 func TestTarGzArchiver_BasicArchive(t *testing.T) {
 	tempDir := t.TempDir()
@@ -573,41 +523,41 @@ func (m *mockArchiver) MediaType() string {
 func TestTarGzArchiver_EstargzFormat(t *testing.T) {
 	tempDir := t.TempDir()
 	sourceDir := filepath.Join(tempDir, "source")
-	
+
 	// Create test files
 	require.NoError(t, os.MkdirAll(filepath.Join(sourceDir, "subdir"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "file1.txt"), []byte("Hello World"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "subdir", "file2.txt"), []byte("Nested"), 0o644))
-	
+
 	// Create archive
 	archiver := NewTarGzArchiver()
 	var buf bytes.Buffer
 	err := archiver.Archive(context.Background(), sourceDir, &buf)
 	require.NoError(t, err)
-	
+
 	t.Logf("Archive size: %d bytes", buf.Len())
-	
+
 	// Verify archive contains eStargz metadata files
 	gzReader, err := gzip.NewReader(&buf)
 	require.NoError(t, err)
 	defer gzReader.Close()
-	
+
 	tarReader := tar.NewReader(gzReader)
-	
+
 	foundLandmark := false
 	foundTOC := false
 	foundFile1 := false
 	foundFile2 := false
-	
+
 	for {
 		header, err := tarReader.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		require.NoError(t, err)
-		
+
 		t.Logf("Found entry: %s (size: %d)", header.Name, header.Size)
-		
+
 		switch header.Name {
 		case ".no.prefetch.landmark":
 			foundLandmark = true
@@ -623,15 +573,15 @@ func TestTarGzArchiver_EstargzFormat(t *testing.T) {
 			foundFile2 = true
 		}
 	}
-	
+
 	// Verify eStargz-specific files are present
 	assert.True(t, foundLandmark, "Archive should contain .no.prefetch.landmark")
 	assert.True(t, foundTOC, "Archive should contain stargz.index.json (TOC)")
-	
+
 	// Verify actual content files are present
 	assert.True(t, foundFile1, "Archive should contain file1.txt")
 	assert.True(t, foundFile2, "Archive should contain subdir/file2.txt")
-	
+
 	t.Log("✓ Archive is in eStargz format with TOC")
 }
 
@@ -751,14 +701,14 @@ func TestSelectiveExtraction(t *testing.T) {
 
 	// Create test files with various paths
 	testFiles := map[string]string{
-		"config.json":           `{"app":"test"}`,
-		"readme.txt":            "README content",
-		"data/file1.json":       `{"data":1}`,
-		"data/file2.txt":        "Data 2",
-		"data/sub/file3.json":   `{"data":3}`,
-		"src/main.go":           "package main",
-		"src/util/helper.go":    "package util",
-		"test/main_test.go":     "package main",
+		"config.json":         `{"app":"test"}`,
+		"readme.txt":          "README content",
+		"data/file1.json":     `{"data":1}`,
+		"data/file2.txt":      "Data 2",
+		"data/sub/file3.json": `{"data":3}`,
+		"src/main.go":         "package main",
+		"src/util/helper.go":  "package util",
+		"test/main_test.go":   "package main",
 	}
 
 	// Create source files

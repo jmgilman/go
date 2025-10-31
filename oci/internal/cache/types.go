@@ -129,3 +129,24 @@ func (c *TagResolverConfig) SetDefaults() {
 		c.EnableHistory = true // Enable history by default
 	}
 }
+
+// TOCCacheEntry represents a cached Table of Contents (TOC) from an eStargz blob.
+// The TOC contains file metadata (names, sizes, offsets) without actual file content.
+// Caching the TOC separately enables instant ListFiles() operations without HTTP requests.
+type TOCCacheEntry struct {
+	// Digest is the blob digest this TOC belongs to (sha256:abc...)
+	Digest string `json:"digest"`
+	// TOCData is the serialized TOC entries (JSON format)
+	// This is stored as raw bytes to avoid importing estargz package here
+	TOCData []byte `json:"toc_data"`
+	// FileCount is the number of files in this TOC
+	FileCount int `json:"file_count"`
+	// TotalSize is the total uncompressed size of all files
+	TotalSize int64 `json:"total_size"`
+	// CreatedAt is when this TOC was cached
+	CreatedAt time.Time `json:"created_at"`
+	// AccessedAt is when this TOC was last accessed
+	AccessedAt time.Time `json:"accessed_at"`
+	// TTL is the time-to-live for this TOC cache entry
+	TTL time.Duration `json:"ttl"`
+}
