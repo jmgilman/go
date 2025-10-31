@@ -3,6 +3,8 @@ module github.com/jmgilman/go/oci
 go 1.24.2
 
 require (
+	github.com/containerd/stargz-snapshotter/estargz v0.18.0
+	github.com/docker/distribution v2.8.3+incompatible
 	github.com/jmgilman/go/fs/billy v0.1.1
 	github.com/jmgilman/go/fs/core v0.2.0
 	github.com/opencontainers/go-digest v1.0.0
@@ -60,6 +62,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/tklauser/go-sysconf v0.3.13 // indirect
 	github.com/tklauser/numcpus v0.7.0 // indirect
+	github.com/vbatts/tar-split v0.12.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
@@ -70,7 +73,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.8.0 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

@@ -4,6 +4,8 @@ A secure, extensible Go library for distributing file bundles as OCI artifacts u
 
 ## Features
 
+- **eStargz Format**: Modern seekable tar.gz format with 100% backward compatibility
+- **Selective Extraction**: Extract only needed files using glob patterns to save disk I/O and CPU
 - **Secure by Default**: Prevents common vulnerabilities like path traversal and zip bombs
 - **Extensible**: Support for multiple archive formats via interfaces
 - **Flexible Authentication**: Multiple auth mechanisms (Docker config, static, custom functions)
@@ -54,6 +56,94 @@ func main() {
         log.Fatal(err)
     }
 }
+```
+
+## eStargz Format & Selective Extraction
+
+### What is eStargz?
+
+All archives created by this module use the **eStargz (extended stargz)** format, which provides:
+- **100% backward compatibility** with standard tar.gz (can be extracted with `tar -xzf`)
+- **Table of Contents (TOC)** for efficient file lookup without full decompression
+- **Random access** capability for HTTP Range request optimizations
+- **No additional dependencies** for basic tar.gz compatibility
+
+### Selective File Extraction
+
+Extract only the files you need instead of the entire archive:
+
+```go
+// Extract only JSON configuration files
+err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "./config",
+    ocibundle.WithFilesToExtract("**/*.json"),
+)
+
+// Extract multiple file types
+err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "./app",
+    ocibundle.WithFilesToExtract(
+        "config.json",      // Specific file
+        "data/*.json",      // All JSON in data/ directory
+        "**/*.yaml",        // All YAML files recursively
+        "bin/app",          // Specific binary
+    ),
+)
+
+// Extract source code only
+err := client.Pull(ctx, "ghcr.io/myorg/source:v1.0", "./src",
+    ocibundle.WithFilesToExtract("**/*.go", "**/*.mod", "**/*.sum"),
+)
+```
+
+### Pattern Syntax
+
+Supported glob patterns for selective extraction:
+
+| Pattern | Description | Example Match |
+|---------|-------------|---------------|
+| `*.json` | Files in root with .json extension | `config.json` |
+| `config/*` | All files directly in config/ | `config/app.yaml` |
+| `**/*.txt` | All .txt files recursively | `data/logs/app.txt` |
+| `data/**/*.json` | All .json under data/ | `data/users/1.json` |
+| `bin/app` | Exact file path | `bin/app` |
+
+### Benefits of Selective Extraction
+
+- **Faster extraction**: Only processes needed files
+- **Saves disk space**: Unwanted files never written to disk
+- **Reduces I/O**: Non-matching files skipped entirely
+- **Lower CPU usage**: Less decompression work
+- **Security maintained**: All validators still enforced on matched files
+
+### Example Use Cases
+
+**Configuration deployment:**
+```go
+// Extract only runtime configuration
+err := client.Pull(ctx, ref, "./runtime",
+    ocibundle.WithFilesToExtract("config/*.yaml", "secrets/*.json"),
+)
+```
+
+**Development environment:**
+```go
+// Get only source code, skip binaries
+err := client.Pull(ctx, ref, "./workspace",
+    ocibundle.WithFilesToExtract("**/*.go", "**/*.proto", "**/*.md"),
+)
+```
+
+**Multi-stage builds:**
+```go
+// Extract different artifacts in stages
+// Stage 1: Get build artifacts
+err := client.Pull(ctx, ref, "./build",
+    ocibundle.WithFilesToExtract("dist/**/*"),
+)
+
+// Stage 2: Get documentation
+err := client.Pull(ctx, ref, "./docs",
+    ocibundle.WithFilesToExtract("**/*.md", "**/*.html"),
+)
 ```
 
 ## Examples

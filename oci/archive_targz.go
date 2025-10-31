@@ -1,9 +1,10 @@
 // Package ocibundle provides OCI bundle distribution functionality.
-// This file contains the tar.gz implementation of the Archiver interface.
+// This file contains the eStargz (seekable tar.gz) implementation of the Archiver interface.
 package ocibundle
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -14,30 +15,34 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/jmgilman/go/fs/billy"
 	"github.com/jmgilman/go/fs/core"
 
 	validatepkg "github.com/jmgilman/go/oci/internal/validate"
 )
 
-// TarGzArchiver implements the Archiver interface using tar.gz format.
-// It provides secure, streaming archive and extraction operations with
-// comprehensive validation and progress reporting capabilities.
+// TarGzArchiver implements the Archiver interface using eStargz format.
+// eStargz (extended stargz) is a seekable tar.gz format that is 100% backward
+// compatible with standard tar.gz but enables selective file extraction via
+// HTTP Range requests. It provides secure, streaming archive and extraction
+// operations with comprehensive validation and progress reporting capabilities.
 // Uses concurrent processing for improved performance on multi-core systems.
 type TarGzArchiver struct {
 	fs core.FS
 }
 
 // NewTarGzArchiver creates a new TarGzArchiver instance.
-// The archiver uses standard tar.gz format compatible with common tools
-// and implements security validation during extraction.
+// The archiver uses eStargz format which is fully compatible with standard tar.gz
+// tools while enabling advanced features like lazy loading and selective extraction.
+// Implements security validation during extraction.
 func NewTarGzArchiver() *TarGzArchiver {
 	return &TarGzArchiver{fs: billy.NewLocal()}
 }
 
-// Archive creates a tar.gz archive from the specified source directory.
-// The archive is written to the provided output writer in a streaming fashion
-// to minimize memory usage even with large directories.
+// Archive creates an eStargz archive from the specified source directory.
+// The archive is created in eStargz format, which is fully backward compatible
+// with standard tar.gz but enables selective file extraction.
 //
 // Parameters:
 //   - ctx: Context for cancellation
@@ -50,9 +55,9 @@ func (a *TarGzArchiver) Archive(ctx context.Context, sourceDir string, output io
 	return a.ArchiveWithProgress(ctx, sourceDir, output, nil)
 }
 
-// ArchiveWithProgress creates a tar.gz archive from the specified source directory with progress reporting.
-// The archive is written to the provided output writer in a streaming fashion
-// to minimize memory usage even with large directories.
+// ArchiveWithProgress creates an eStargz archive from the specified source directory with progress reporting.
+// The archive is created using eStargz format with default compression level (gzip level 9).
+// eStargz provides the same compression as standard tar.gz while enabling selective extraction.
 // Uses concurrent file processing for improved performance.
 //
 // Parameters:
@@ -104,16 +109,42 @@ func (a *TarGzArchiver) ArchiveWithProgress(
 		}
 	}
 
-	gzipWriter := gzip.NewWriter(output)
-	defer gzipWriter.Close()
-
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
+	// Step 1: Create uncompressed tar in a buffer
+	var tarBuf bytes.Buffer
+	tarWriter := tar.NewWriter(&tarBuf)
 
 	var currentSize int64
 
-	// Use concurrent processing for better performance
-	return a.archiveWithConcurrency(ctx, sourceDir, tarWriter, &currentSize, totalSize, progress)
+	// Use concurrent processing to build the tar
+	if err := a.archiveWithConcurrency(ctx, sourceDir, tarWriter, &currentSize, totalSize, progress); err != nil {
+		return err
+	}
+
+	// Close tar writer to finalize the tar archive
+	if err := tarWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	// Step 2: Convert the uncompressed tar to eStargz format
+	tarBytes := tarBuf.Bytes()
+	tarReader := io.NewSectionReader(bytes.NewReader(tarBytes), 0, int64(len(tarBytes)))
+
+	// Build eStargz with compression level 9 (maximum compression)
+	estargzBlob, err := estargz.Build(tarReader, estargz.WithCompressionLevel(9))
+	if err != nil {
+		return fmt.Errorf("failed to build estargz archive: %w", err)
+	}
+	defer estargzBlob.Close()
+
+	// Step 3: Copy the eStargz blob to the output
+	// Note: Progress tracking for the estargz compression phase would be complex
+	// since estargz.Build doesn't provide progress callbacks. The progress callback
+	// above tracks the tar creation phase which is the bulk of the work.
+	if _, err := io.Copy(output, estargzBlob); err != nil {
+		return fmt.Errorf("failed to write estargz archive: %w", err)
+	}
+
+	return nil
 }
 
 // archiveWithConcurrency implements concurrent file processing for archiving.
@@ -317,6 +348,13 @@ func (a *TarGzArchiver) Extract(ctx context.Context, input io.Reader, targetDir 
 			return fmt.Errorf("failed to read tar header: %w", nextErr)
 		}
 
+		// Skip eStargz metadata files - these are format-specific files not part of the actual content
+		// .no.prefetch.landmark - eStargz landmark file
+		// stargz.index.json - eStargz Table of Contents (TOC)
+		if isEstargzMetadata(header.Name) {
+			continue
+		}
+
 		if err := handleHeader(ctx, tarReader, header, targetDir, rootAbs, opts, validators, pv, &totalSize, &fileCount, a.fs); err != nil {
 			return err
 		}
@@ -330,4 +368,13 @@ func (a *TarGzArchiver) Extract(ctx context.Context, input io.Reader, targetDir 
 // the archive format to registry clients.
 func (a *TarGzArchiver) MediaType() string {
 	return "application/vnd.oci.image.layer.v1.tar+gzip"
+}
+
+// isEstargzMetadata checks if a file path is an eStargz metadata file.
+// eStargz adds two metadata files to archives:
+// - .no.prefetch.landmark: Marker file to indicate eStargz format
+// - stargz.index.json: Table of Contents (TOC) for random access
+// These files are not part of the actual content and should be skipped during extraction.
+func isEstargzMetadata(name string) bool {
+	return name == ".no.prefetch.landmark" || name == "stargz.index.json"
 }

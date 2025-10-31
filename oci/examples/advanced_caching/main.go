@@ -32,122 +32,98 @@ func main() {
 		log.Fatalf("Failed to create sample files: %v", err)
 	}
 
-	// Example 1: Custom cache configuration with size limits
-	fmt.Println("\n📊 Example 1: Custom Cache Configuration")
-	fmt.Println("----------------------------------------")
+	// Example 1: Basic push and pull operations
+	// TODO: Advanced caching will be demonstrated here once caching is fully implemented
+	fmt.Println("\n📦 Example 1: Basic Push and Pull")
+	fmt.Println("----------------------------------")
 
-	cacheDir := filepath.Join(cwd, "cache-storage")
-	cacheSize := int64(50 * 1024 * 1024) // 50MB cache limit
-	defaultTTL := 2 * time.Hour          // 2 hour TTL
-
-	client1, err := ocibundle.NewWithOptions(
-		ocibundle.WithCache(cacheDir, cacheSize, defaultTTL),
-		ocibundle.WithCachePolicy(ocibundle.CachePolicyEnabled),
-	)
+	client1, err := ocibundle.New()
 	if err != nil {
-		log.Fatalf("Failed to create client with custom cache: %v", err)
+		log.Fatalf("Failed to create client: %v", err)
 	}
 
 	reference1 := "ghcr.io/your-org/advanced-cache-bundle:v1.0.0"
 	sourceDir := filepath.Join(cwd, "sample-files")
 
-	fmt.Printf("📤 Pushing bundle with custom cache config (50MB limit, 2h TTL)\n")
+	fmt.Printf("📤 Pushing bundle...\n")
 	if err := client1.Push(ctx, sourceDir, reference1); err != nil {
 		log.Fatalf("Failed to push bundle: %v", err)
 	}
 
-	// Pull with custom cache
-	targetDir1 := filepath.Join(cwd, "pulled-custom-cache")
-	fmt.Println("📥 Pulling with custom cache configuration...")
+	// Pull bundle
+	targetDir1 := filepath.Join(cwd, "pulled-bundle")
+	fmt.Println("📥 Pulling bundle...")
 	start := time.Now()
-	if err := client1.PullWithCache(ctx, reference1, targetDir1); err != nil {
+	if err := client1.Pull(ctx, reference1, targetDir1); err != nil {
 		log.Fatalf("Failed to pull bundle: %v", err)
 	}
 	fmt.Printf("✅ Pull completed in %v\n", time.Since(start))
 
-	// Example 2: Pull-only caching policy
-	fmt.Println("\n📥 Example 2: Pull-Only Caching Policy")
-	fmt.Println("-------------------------------------")
+	// Example 2: Multiple operations
+	// TODO: Demonstrate pull-only caching policy once caching is implemented
+	fmt.Println("\n📦 Example 2: Multiple Operations")
+	fmt.Println("----------------------------------")
 
-	client2, err := ocibundle.NewWithOptions(
-		ocibundle.WithCachePolicy(ocibundle.CachePolicyPull),
-	)
+	client2, err := ocibundle.New()
 	if err != nil {
-		log.Fatalf("Failed to create client with pull-only cache: %v", err)
+		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	reference2 := "ghcr.io/your-org/pull-only-cache-bundle:v1.0.0"
+	reference2 := "ghcr.io/your-org/multiple-ops-bundle:v1.0.0"
 
-	fmt.Println("📤 Pushing bundle (cache not used for push with pull-only policy)")
+	fmt.Println("📤 Pushing bundle...")
 	if err := client2.Push(ctx, sourceDir, reference2); err != nil {
 		log.Fatalf("Failed to push bundle: %v", err)
 	}
 
-	targetDir2 := filepath.Join(cwd, "pulled-pull-only")
-	fmt.Println("📥 Pulling with pull-only cache policy...")
+	targetDir2 := filepath.Join(cwd, "pulled-multiple")
+	fmt.Println("📥 Pulling bundle...")
 	start = time.Now()
-	if err := client2.PullWithCache(ctx, reference2, targetDir2); err != nil {
+	if err := client2.Pull(ctx, reference2, targetDir2); err != nil {
 		log.Fatalf("Failed to pull bundle: %v", err)
 	}
 	fmt.Printf("✅ Pull completed in %v\n", time.Since(start))
 
-	// Example 3: Cache bypass demonstration
-	fmt.Println("\n�� Example 3: Cache Bypass")
-	fmt.Println("-------------------------")
+	// Example 3: Push with annotations
+	// TODO: Demonstrate cache bypass once caching is implemented
+	fmt.Println("\n📝 Example 3: Push with Annotations")
+	fmt.Println("------------------------------------")
 
-	client3, err := ocibundle.NewWithOptions(
-		ocibundle.WithCachePolicy(ocibundle.CachePolicyEnabled),
-	)
+	client3, err := ocibundle.New()
 	if err != nil {
-		log.Fatalf("Failed to create client with cache bypass: %v", err)
+		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	reference3 := "ghcr.io/your-org/bypass-cache-bundle:v1.0.0"
+	reference3 := "ghcr.io/your-org/annotated-bundle:v1.0.0"
 
-	// First pull - will cache
-	targetDir3a := filepath.Join(cwd, "pulled-bypass-a")
-	fmt.Println("📥 First pull (will populate cache)...")
-	if err := client3.PullWithCache(ctx, reference3, targetDir3a); err != nil {
+	// Push with annotations
+	annotations := map[string]string{
+		"org.opencontainers.image.created": time.Now().Format(time.RFC3339),
+		"org.opencontainers.image.title":   "Annotated Bundle Example",
+		"org.opencontainers.image.version": "1.0.0",
+	}
+
+	fmt.Println("📤 Pushing bundle with annotations...")
+	if err := client3.Push(ctx, sourceDir, reference3,
+		ocibundle.WithAnnotations(annotations),
+	); err != nil {
+		log.Fatalf("Failed to push bundle: %v", err)
+	}
+
+	targetDir3 := filepath.Join(cwd, "pulled-annotated")
+	fmt.Println("📥 Pulling annotated bundle...")
+	if err := client3.Pull(ctx, reference3, targetDir3); err != nil {
 		log.Fatalf("Failed to pull bundle: %v", err)
 	}
+	fmt.Println("✅ Annotated bundle operations completed")
 
-	// Second pull with bypass - will skip cache
-	targetDir3b := filepath.Join(cwd, "pulled-bypass-b")
-	fmt.Println("📥 Second pull with cache bypass...")
-	start = time.Now()
-	if err := client3.PullWithCache(ctx, reference3, targetDir3b,
-		ocibundle.WithCacheBypass(true),
-	); err != nil {
-		log.Fatalf("Failed to pull bundle with bypass: %v", err)
-	}
-	fmt.Printf("✅ Bypassed pull completed in %v\n", time.Since(start))
-
-	// Example 4: Cache statistics and management
-	fmt.Println("\n📈 Example 4: Cache Statistics")
-	fmt.Println("------------------------------")
-
-	// Note: In a real implementation, you would access cache statistics
-	// through the coordinator interface. For this example, we'll show
-	// how to configure and manage cache directories.
-
-	fmt.Printf("Cache directory: %s\n", cacheDir)
-	fmt.Printf("Cache size limit: %d MB\n", cacheSize/(1024*1024))
-	fmt.Printf("Default TTL: %v\n", defaultTTL)
-
-	// Check if cache directory exists and show its size
-	if info, err := os.Stat(cacheDir); err == nil {
-		fmt.Printf("Cache directory exists: %s\n", info.Name())
-	} else {
-		fmt.Printf("Cache directory not yet created\n")
-	}
-
-	fmt.Println("\n🎉 Advanced caching configuration example completed!")
-	fmt.Println("\n💡 Key takeaways:")
-	fmt.Println("  - Configure cache size limits to control disk usage")
-	fmt.Println("  - Set appropriate TTL values for your use case")
-	fmt.Println("  - Use pull-only policy to avoid cache overhead on push operations")
-	fmt.Println("  - Cache bypass allows forcing fresh pulls when needed")
-	fmt.Println("  - Monitor cache directory usage and performance")
+	fmt.Println("\n🎉 Example completed!")
+	fmt.Println("\n💡 Note: Advanced caching features are planned for future implementation")
+	fmt.Println("  - Cache size limits and TTL configuration")
+	fmt.Println("  - Pull-only and push-only caching policies")
+	fmt.Println("  - Cache bypass options")
+	fmt.Println("  - Cache statistics and monitoring")
+	fmt.Println("\nFor now, this example demonstrates basic push/pull operations.")
 }
 
 // createSampleFiles creates a directory with sample files for demonstration

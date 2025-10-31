@@ -9,6 +9,14 @@ This directory contains runnable example programs demonstrating how to use the O
 - **[basic/main.go](./basic/main.go)** - Simple push/pull operations with default settings
 - **[basic_with_progress/main.go](./basic_with_progress/main.go)** - Basic operations with progress reporting
 
+### eStargz & Selective Extraction
+
+- **[selective_extraction/main.go](./selective_extraction/main.go)** - Extract only needed files using glob patterns
+  - Extract only JSON configuration files
+  - Extract source code separately
+  - Combine patterns for complex scenarios
+  - Apply security limits during extraction
+
 ### Advanced Usage
 
 - **[advanced/main.go](./advanced/main.go)** - Advanced usage with custom options and error handling

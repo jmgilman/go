@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -590,4 +591,108 @@ func BenchmarkLocalRegistryOperations(b *testing.B) {
 		// Clean up target directory
 		os.RemoveAll(targetDir)
 	}
+}
+
+// TestClient_SelectiveExtraction tests selective file extraction with glob patterns
+func TestClient_SelectiveExtraction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+
+	// Start test registry
+	registry, err := testutil.NewTestRegistry(ctx)
+	require.NoError(t, err)
+	defer registry.Close(ctx)
+
+	err = registry.WaitForReady(ctx, 30*time.Second)
+	require.NoError(t, err)
+
+	// Create test data with various files
+	sourceDir := t.TempDir()
+	testFiles := map[string]string{
+		"config.json":           `{"app":"test"}`,
+		"readme.txt":            "README content",
+		"data/file1.json":       `{"data":1}`,
+		"data/file2.txt":        "Data 2",
+		"data/sub/file3.json":   `{"data":3}`,
+		"src/main.go":           "package main",
+		"src/util/helper.go":    "package util",
+		"test/main_test.go":     "package main",
+	}
+
+	for path, content := range testFiles {
+		fullPath := filepath.Join(sourceDir, path)
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
+	}
+
+	// Create client
+	client, err := NewWithOptions(
+		WithHTTP(true, true, []string{registry.Reference()}),
+	)
+	require.NoError(t, err)
+
+	// Push the test data
+	reference := fmt.Sprintf("%s/selective-test:latest", registry.Reference())
+	err = client.Push(ctx, sourceDir, reference)
+	require.NoError(t, err)
+	t.Logf("Pushed test data to %s", reference)
+
+	// Test 1: Pull only JSON files
+	t.Run("extract only JSON files", func(t *testing.T) {
+		targetDir := t.TempDir()
+		err := client.Pull(ctx, reference, targetDir,
+			WithFilesToExtract("**/*.json"),
+		)
+		require.NoError(t, err)
+
+		// Verify only JSON files were extracted
+		assert.FileExists(t, filepath.Join(targetDir, "config.json"))
+		assert.FileExists(t, filepath.Join(targetDir, "data/file1.json"))
+		assert.FileExists(t, filepath.Join(targetDir, "data/sub/file3.json"))
+
+		// Verify non-JSON files were NOT extracted
+		assert.NoFileExists(t, filepath.Join(targetDir, "readme.txt"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "data/file2.txt"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "src/main.go"))
+	})
+
+	// Test 2: Pull only Go files
+	t.Run("extract only Go files", func(t *testing.T) {
+		targetDir := t.TempDir()
+		err := client.Pull(ctx, reference, targetDir,
+			WithFilesToExtract("**/*.go"),
+		)
+		require.NoError(t, err)
+
+		// Verify only Go files were extracted
+		assert.FileExists(t, filepath.Join(targetDir, "src/main.go"))
+		assert.FileExists(t, filepath.Join(targetDir, "src/util/helper.go"))
+		assert.FileExists(t, filepath.Join(targetDir, "test/main_test.go"))
+
+		// Verify non-Go files were NOT extracted
+		assert.NoFileExists(t, filepath.Join(targetDir, "config.json"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "readme.txt"))
+	})
+
+	// Test 3: Pull multiple patterns
+	t.Run("extract with multiple patterns", func(t *testing.T) {
+		targetDir := t.TempDir()
+		err := client.Pull(ctx, reference, targetDir,
+			WithFilesToExtract("config.json", "data/*.json"),
+		)
+		require.NoError(t, err)
+
+		// Verify matched files were extracted
+		assert.FileExists(t, filepath.Join(targetDir, "config.json"))
+		assert.FileExists(t, filepath.Join(targetDir, "data/file1.json"))
+
+		// Note: data/sub/file3.json should NOT match "data/*.json" (not recursive)
+		assert.NoFileExists(t, filepath.Join(targetDir, "data/sub/file3.json"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "src/main.go"))
+	})
+
+	t.Log("✓ Selective extraction tests passed")
 }

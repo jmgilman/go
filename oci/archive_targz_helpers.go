@@ -15,6 +15,99 @@ import (
 	validatepkg "github.com/jmgilman/go/oci/internal/validate"
 )
 
+// matchesAnyPattern checks if a file path matches at least one of the provided glob patterns.
+// Supports standard glob patterns plus ** for recursive directory matching.
+//
+// Pattern examples:
+//   - "*.json" matches any .json file in the root
+//   - "config/*" matches any file directly in config/
+//   - "data/**/*.txt" matches any .txt file in data/ or its subdirectories
+//   - "bin/app" matches exact path
+//
+// Returns true if patterns is empty (matches all) or if path matches at least one pattern.
+func matchesAnyPattern(path string, patterns []string) bool {
+	// Empty patterns means extract everything
+	if len(patterns) == 0 {
+		return true
+	}
+
+	// Normalize path to use forward slashes for consistent matching
+	normalizedPath := filepath.ToSlash(path)
+
+	for _, pattern := range patterns {
+		if matchesPattern(normalizedPath, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchesPattern checks if a path matches a single glob pattern.
+// Supports ** for recursive directory matching.
+func matchesPattern(path, pattern string) bool {
+	// Normalize pattern to use forward slashes
+	pattern = filepath.ToSlash(pattern)
+
+	// Handle ** (recursive directory wildcard)
+	if strings.Contains(pattern, "**") {
+		return matchesRecursivePattern(path, pattern)
+	}
+
+	// Use standard filepath matching for simple patterns
+	matched, err := filepath.Match(pattern, path)
+	if err != nil {
+		// Invalid pattern, don't match
+		return false
+	}
+	return matched
+}
+
+// matchesRecursivePattern handles patterns containing ** for recursive matching.
+// Example: "data/**/*.txt" matches "data/file.txt", "data/sub/file.txt", etc.
+func matchesRecursivePattern(path, pattern string) bool {
+	// Split pattern on **
+	parts := strings.Split(pattern, "**")
+	if len(parts) == 1 {
+		// No ** found, shouldn't happen but handle gracefully
+		matched, _ := filepath.Match(pattern, path)
+		return matched
+	}
+
+	// For simplicity, we'll handle the most common case: prefix/**/suffix
+	// More complex patterns with multiple ** can be added later if needed
+	prefix := strings.TrimSuffix(parts[0], "/")
+	suffix := strings.TrimPrefix(parts[len(parts)-1], "/")
+
+	// Check prefix match
+	if prefix != "" {
+		if !strings.HasPrefix(path, prefix) {
+			return false
+		}
+		// Remove prefix from path for suffix matching
+		path = strings.TrimPrefix(path, prefix)
+		path = strings.TrimPrefix(path, "/")
+	}
+
+	// Check suffix match
+	if suffix != "" {
+		// Extract the remaining path after removing any intermediate directories
+		// and check if it matches the suffix pattern
+		pathParts := strings.Split(path, "/")
+		for i := 0; i < len(pathParts); i++ {
+			remainingPath := strings.Join(pathParts[i:], "/")
+			matched, err := filepath.Match(suffix, remainingPath)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
+	}
+
+	// If there's only a prefix (pattern ends with **), match anything under it
+	return true
+}
+
 // collectFileInfos walks the source directory and returns all entries with
 // their original path, relative path, and os.FileInfo.
 func collectFileInfos(fsys core.FS, sourceDir string) ([]fileInfoEntry, error) {
@@ -167,6 +260,25 @@ func handleHeader(
 	fullPath, err := normalizeAndResolvePath(pv, hdr.Name, opts.StripPrefix, targetDir, rootAbs)
 	if err != nil {
 		return err
+	}
+
+	// Check if file matches selective extraction patterns (if specified)
+	// Use the path after strip prefix has been applied for pattern matching
+	pathForMatching := hdr.Name
+	if opts.StripPrefix != "" && strings.HasPrefix(pathForMatching, opts.StripPrefix) {
+		pathForMatching = strings.TrimPrefix(pathForMatching, opts.StripPrefix)
+		pathForMatching = strings.TrimPrefix(pathForMatching, "/")
+	}
+
+	// For selective extraction:
+	// - Always extract directories (they're needed for nested files)
+	// - Only extract files that match the patterns
+	if len(opts.FilesToExtract) > 0 && hdr.Typeflag != tar.TypeDir {
+		if !matchesAnyPattern(pathForMatching, opts.FilesToExtract) {
+			// File doesn't match any pattern, skip it but don't count it
+			*fileCount-- // Decrement since we incremented at the start
+			return nil
+		}
 	}
 
 	if err := validateFileAndArchive(validators, hdr, opts, totalSize, fileCount); err != nil {

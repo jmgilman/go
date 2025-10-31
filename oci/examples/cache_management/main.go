@@ -1,5 +1,8 @@
 // Package main demonstrates cache management operations of the OCI Bundle Distribution Module.
 // This example shows how to monitor cache statistics, perform cleanup, and manage cache lifecycle.
+//
+// NOTE: Caching functionality is currently in development. This example demonstrates
+// basic operations that will benefit from caching once it's fully implemented.
 package main
 
 import (
@@ -19,9 +22,10 @@ func main() {
 
 	fmt.Println("🚀 OCI Bundle Cache Management Example")
 	fmt.Println("======================================")
+	fmt.Println("\nNOTE: Advanced caching features are planned for future implementation.")
+	fmt.Println("This example demonstrates basic operations that will benefit from caching.\n")
 
 	// Get current working directory for absolute paths
-	// Note: billy.NewLocal() creates a filesystem rooted at "/", so we need absolute paths
 	cwd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v", err)
@@ -32,26 +36,17 @@ func main() {
 		log.Fatalf("Failed to create sample files: %v", err)
 	}
 
-	// Initialize the client with caching enabled
-	cacheDir := filepath.Join(cwd, "cache-management")
-	cacheSize := int64(100 * 1024 * 1024) // 100MB cache
-
-	client, err := ocibundle.NewWithOptions(
-		ocibundle.WithCache(cacheDir, cacheSize, 1*time.Hour),
-		ocibundle.WithCachePolicy(ocibundle.CachePolicyEnabled),
-	)
+	// Initialize the client
+	client, err := ocibundle.New()
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	fmt.Printf("📊 Cache Configuration:\n")
-	fmt.Printf("  Directory: %s\n", cacheDir)
-	fmt.Printf("  Size Limit: %d MB\n", cacheSize/(1024*1024))
-	fmt.Printf("  Default TTL: 1 hour\n")
+	fmt.Printf("📊 Client initialized\n")
 
-	// Example 1: Populate cache with multiple bundles
-	fmt.Println("\n📥 Example 1: Populating Cache")
-	fmt.Println("-----------------------------")
+	// Example 1: Push multiple bundles
+	fmt.Println("\n📥 Example 1: Push Multiple Bundles")
+	fmt.Println("-----------------------------------")
 
 	bundles := []struct {
 		name string
@@ -72,82 +67,53 @@ func main() {
 			log.Fatalf("Failed to push %s: %v", bundle.name, err)
 		}
 
-		// Pull to populate cache
+		// Pull bundle
 		targetDir := filepath.Join(cwd, fmt.Sprintf("pulled-%s", bundle.name))
-		fmt.Printf("📥 Pulling %s to populate cache...\n", bundle.name)
-		if err := client.PullWithCache(ctx, reference, targetDir); err != nil {
+		fmt.Printf("📥 Pulling %s...\n", bundle.name)
+		if err := client.Pull(ctx, reference, targetDir); err != nil {
 			log.Fatalf("Failed to pull %s: %v", bundle.name, err)
 		}
 	}
 
-	fmt.Println("✅ Cache populated with test bundles")
+	fmt.Println("✅ Bundle operations completed")
 
-	// Example 2: Cache Statistics
-	fmt.Println("\n📈 Example 2: Cache Statistics")
-	fmt.Println("------------------------------")
-
-	displayCacheStats(cacheDir)
-
-	// Example 3: Cache Performance Demonstration
-	fmt.Println("\n⚡ Example 3: Cache Performance")
-	fmt.Println("------------------------------")
+	// Example 2: Performance Comparison
+	fmt.Println("\n⚡ Example 2: Performance Comparison")
+	fmt.Println("------------------------------------")
 
 	reference := "ghcr.io/your-org/cache-mgmt-small-bundle:v1.0.0"
 
-	// First pull (from registry)
+	// First pull
 	targetDir1 := filepath.Join(cwd, "performance-test-1")
-	fmt.Println("🏃 First pull (from registry)...")
+	fmt.Println("🏃 First pull...")
 	start := time.Now()
-	if err := client.PullWithCache(ctx, reference, targetDir1); err != nil {
+	if err := client.Pull(ctx, reference, targetDir1); err != nil {
 		log.Fatalf("Failed first pull: %v", err)
 	}
-	registryPullTime := time.Since(start)
-	fmt.Printf("   Completed in: %v\n", registryPullTime)
+	firstPullTime := time.Since(start)
+	fmt.Printf("   Completed in: %v\n", firstPullTime)
 
-	// Second pull (from cache)
+	// Second pull to different directory
 	targetDir2 := filepath.Join(cwd, "performance-test-2")
-	fmt.Println("🚀 Second pull (from cache)...")
+	fmt.Println("🚀 Second pull...")
 	start = time.Now()
-	if err := client.PullWithCache(ctx, reference, targetDir2); err != nil {
-		log.Fatalf("Failed cached pull: %v", err)
+	if err := client.Pull(ctx, reference, targetDir2); err != nil {
+		log.Fatalf("Failed second pull: %v", err)
 	}
-	cachedPullTime := time.Since(start)
-	fmt.Printf("   Completed in: %v\n", cachedPullTime)
+	secondPullTime := time.Since(start)
+	fmt.Printf("   Completed in: %v\n", secondPullTime)
 
-	// Calculate improvement
-	if cachedPullTime < registryPullTime {
-		improvement := float64(registryPullTime) / float64(cachedPullTime)
-		fmt.Printf("�� Performance improvement: %.1fx faster!\n", improvement)
-	}
+	fmt.Println("\n✅ Performance comparison completed")
+	fmt.Println("   Note: With caching enabled, the second pull would be significantly faster")
 
-	// Example 4: Manual Cache Management
-	fmt.Println("\n🧹 Example 4: Manual Cache Management")
-	fmt.Println("------------------------------------")
-
-	fmt.Println("📂 Cache directory contents before cleanup:")
-	listCacheContents(cacheDir)
-
-	// Simulate cache maintenance (in a real scenario, this would be automatic)
-	fmt.Println("\n🕐 Simulating cache maintenance...")
-	time.Sleep(2 * time.Second)
-
-	fmt.Println("📂 Cache directory contents after maintenance:")
-	listCacheContents(cacheDir)
-
-	// Example 5: Cache Size Monitoring
-	fmt.Println("\n📏 Example 5: Cache Size Monitoring")
-	fmt.Println("----------------------------------")
-
-	fmt.Println("💾 Cache size information:")
-	displayCacheSize(cacheDir)
-
-	fmt.Println("\n🎉 Cache management example completed!")
-	fmt.Println("\n💡 Cache management best practices:")
-	fmt.Println("  - Monitor cache size and set appropriate limits")
-	fmt.Println("  - Configure TTL based on your update frequency")
-	fmt.Println("  - Use cache statistics to optimize performance")
-	fmt.Println("  - Implement cleanup routines for maintenance")
-	fmt.Println("  - Consider cache bypass for critical fresh pulls")
+	fmt.Println("\n🎉 Example completed!")
+	fmt.Println("\n💡 Planned cache management features:")
+	fmt.Println("  - Cache statistics and hit/miss monitoring")
+	fmt.Println("  - Cache size limits and automatic cleanup")
+	fmt.Println("  - TTL-based expiration")
+	fmt.Println("  - Manual cache maintenance operations")
+	fmt.Println("  - Cache bypass for critical operations")
+	fmt.Println("\nFor now, this example demonstrates basic push/pull operations.")
 }
 
 // createSampleFiles creates a directory with sample files for demonstration
@@ -162,16 +128,16 @@ func createSampleFiles() error {
 	readmeFile := filepath.Join(dir, "CACHE_MANAGEMENT.md")
 	readme := `# OCI Bundle Cache Management
 
-This bundle demonstrates cache management features:
+This bundle demonstrates cache management features (planned for future implementation):
 
-## Cache Operations
+## Planned Cache Operations
 
 - **Statistics**: Monitor hit rates, size, and performance
 - **Cleanup**: Automatic and manual cache maintenance
 - **Size Limits**: Control disk usage with configurable limits
 - **TTL Management**: Time-based expiration of cache entries
 
-## Cache Monitoring
+## Planned Cache Monitoring
 
 Monitor these key metrics:
 - Cache hit/miss ratios
@@ -179,7 +145,7 @@ Monitor these key metrics:
 - Entry count and distribution
 - Performance improvements
 
-## Maintenance Tasks
+## Planned Maintenance Tasks
 
 - Regular cleanup of expired entries
 - Size-based eviction when limits exceeded
@@ -222,7 +188,7 @@ Monitor these key metrics:
   "bundle": {
     "name": "cache-management-demo",
     "version": "1.0.0",
-    "description": "Demonstration of OCI bundle cache management"
+    "description": "Demonstration of OCI bundle cache management (planned)"
   }
 }`
 
@@ -253,115 +219,4 @@ Monitor these key metrics:
 	}
 
 	return nil
-}
-
-// displayCacheStats shows cache statistics
-func displayCacheStats(cacheDir string) {
-	info, err := os.Stat(cacheDir)
-	if err != nil {
-		fmt.Printf("Cache directory does not exist yet\n")
-		return
-	}
-
-	fmt.Printf("Cache directory: %s\n", info.Name())
-	fmt.Printf("Last modified: %s\n", info.ModTime().Format(time.RFC3339))
-}
-
-// listCacheContents lists the contents of the cache directory
-func listCacheContents(cacheDir string) {
-	entries, err := os.ReadDir(cacheDir)
-	if err != nil {
-		fmt.Printf("Cannot read cache directory: %v\n", err)
-		return
-	}
-
-	if len(entries) == 0 {
-		fmt.Println("  (empty)")
-		return
-	}
-
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			fmt.Printf("  %s (error getting info)\n", entry.Name())
-			continue
-		}
-
-		if entry.IsDir() {
-			fmt.Printf("  �� %s/ (%d items)\n", entry.Name(), countDirContents(filepath.Join(cacheDir, entry.Name())))
-		} else {
-			fmt.Printf("  📄 %s (%s)\n", entry.Name(), formatSize(info.Size()))
-		}
-	}
-}
-
-// countDirContents counts items in a directory
-func countDirContents(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	return len(entries)
-}
-
-// displayCacheSize shows cache size information
-func displayCacheSize(cacheDir string) {
-	size, err := calculateDirSize(cacheDir)
-	if err != nil {
-		fmt.Printf("Error calculating cache size: %v\n", err)
-		return
-	}
-
-	fmt.Printf("Total cache size: %s\n", formatSize(size))
-
-	// Count files and directories
-	fileCount, dirCount := countFilesAndDirs(cacheDir)
-	fmt.Printf("Files: %d, Directories: %d\n", fileCount, dirCount)
-}
-
-// calculateDirSize calculates the total size of a directory
-func calculateDirSize(dir string) (int64, error) {
-	var size int64
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			size += info.Size()
-		}
-		return nil
-	})
-
-	return size, err
-}
-
-// countFilesAndDirs counts files and directories in a path
-func countFilesAndDirs(dir string) (files, dirs int) {
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			dirs++
-		} else {
-			files++
-		}
-		return nil
-	})
-	return files, dirs
-}
-
-// formatSize formats a size in bytes to human-readable format
-func formatSize(size int64) string {
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%d B", size)
-	}
-	div, exp := int64(unit), 0
-	for n := size / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
 }

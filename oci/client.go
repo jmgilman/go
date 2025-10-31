@@ -3,6 +3,7 @@
 package ocibundle
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -323,14 +324,56 @@ func (c *Client) Push(ctx context.Context, sourceDir, reference string, opts ...
 // Pull downloads and extracts an OCI artifact to the specified directory.
 // It downloads the artifact from the OCI registry and extracts it with security validation.
 //
+// The method supports both full extraction (default) and selective file extraction using
+// glob patterns. When selective extraction is used, only files matching the specified
+// patterns are extracted, saving disk I/O and CPU time.
+//
 // Parameters:
 //   - ctx: Context for cancellation and timeouts
 //   - reference: OCI reference to download (e.g., "ghcr.io/org/repo:tag")
 //   - targetDir: Directory to extract the artifact to (created if it doesn't exist)
-//   - opts: Optional pull options for security limits and behavior
+//   - opts: Optional pull options for security limits and selective extraction
 //
 // Returns:
 //   - Error if the operation fails
+//
+// Example - Full extraction:
+//
+//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle")
+//
+// Example - Extract only JSON files:
+//
+//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle",
+//	    ocibundle.WithFilesToExtract("**/*.json"),
+//	)
+//
+// Example - Extract multiple patterns:
+//
+//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle",
+//	    ocibundle.WithFilesToExtract("config.json", "data/*.json", "**/*.yaml"),
+//	)
+//
+// Example - With security limits:
+//
+//	err := client.Pull(ctx, "ghcr.io/myorg/bundle:v1.0", "/tmp/bundle",
+//	    ocibundle.WithMaxSize(100*1024*1024),    // 100MB total
+//	    ocibundle.WithMaxFileSize(10*1024*1024), // 10MB per file
+//	    ocibundle.WithMaxFiles(1000),            // Max 1000 files
+//	)
+//
+// Supported glob patterns:
+//   - "*.json" - all .json files in root directory
+//   - "config/*" - all files in config directory
+//   - "**/*.txt" - all .txt files recursively
+//   - "data/**/*.json" - all .json files under data/ and subdirectories
+//
+// Security features:
+//   - Path traversal prevention (blocks ../../../etc/passwd)
+//   - Size limits (per-file and total)
+//   - File count limits
+//   - Permission sanitization (removes setuid/setgid bits)
+//
+// All archives are in eStargz format, which is 100% compatible with standard tar.gz.
 func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...PullOption) error {
 	// Thread safety: use read lock since we're only reading options
 	c.mu.RLock()
@@ -388,21 +431,72 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 	// Ensure we close the descriptor data when done
 	defer descriptor.Data.Close()
 
-	// Create archiver
-	archiver := NewTarGzArchiverWithFS(c.options.FS)
-
 	// Create extract options from pull options
 	extractOpts := ExtractOptions{
-		MaxFiles:      pullOpts.MaxFiles,
-		MaxSize:       pullOpts.MaxSize,
-		MaxFileSize:   pullOpts.MaxFileSize,
-		StripPrefix:   pullOpts.StripPrefix,
-		PreservePerms: pullOpts.PreservePermissions,
+		MaxFiles:       pullOpts.MaxFiles,
+		MaxSize:        pullOpts.MaxSize,
+		MaxFileSize:    pullOpts.MaxFileSize,
+		StripPrefix:    pullOpts.StripPrefix,
+		PreservePerms:  pullOpts.PreservePermissions,
+		FilesToExtract: pullOpts.FilesToExtract,
 	}
 
-	// Extract the archive atomically (all or nothing)
-	if err := c.extractAtomically(ctx, archiver, descriptor.Data, targetDir, extractOpts); err != nil {
-		return fmt.Errorf("failed to extract archive: %w", err)
+	// Decision tree for extraction strategy
+	if len(pullOpts.FilesToExtract) > 0 {
+		// Selective extraction requested
+		// For now, we'll download the full blob and extract selectively
+		// This saves disk I/O and decompression CPU, but not bandwidth
+		// TODO: In future, optimize to use HTTP Range requests when available
+
+		// Read the full blob into memory
+		blobData, err := io.ReadAll(descriptor.Data)
+		if err != nil {
+			return fmt.Errorf("failed to read blob data: %w", err)
+		}
+
+		// Create a ReaderAt from the blob data
+		readerAt := bytes.NewReader(blobData)
+
+		// Try selective extraction with estargz
+		tempDir, tmpErr := c.createTempDir("ocibundle-selective-")
+		if tmpErr != nil {
+			return fmt.Errorf("failed to create temporary directory: %w", tmpErr)
+		}
+		defer func() { _ = c.removeAllFS(tempDir) }()
+
+		// Extract selectively to temp directory
+		if err := extractSelectiveFromStargz(
+			ctx,
+			readerAt,
+			int64(len(blobData)),
+			tempDir,
+			pullOpts.FilesToExtract,
+			extractOpts,
+			c.options.FS,
+		); err != nil {
+			return fmt.Errorf("failed to extract selectively: %w", err)
+		}
+
+		// Ensure target directory exists
+		if err := c.options.FS.MkdirAll(targetDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create target directory: %w", err)
+		}
+
+		// Move extracted files to target directory
+		if err := c.moveFiles(tempDir, targetDir); err != nil {
+			// Clean up any partially moved files
+			_ = c.removeAllFS(targetDir)
+			return fmt.Errorf("failed to move extracted files: %w", err)
+		}
+
+	} else {
+		// Full extraction (no selective patterns)
+		// Use existing extraction logic
+		archiver := NewTarGzArchiverWithFS(c.options.FS)
+
+		if err := c.extractAtomically(ctx, archiver, descriptor.Data, targetDir, extractOpts); err != nil {
+			return fmt.Errorf("failed to extract archive: %w", err)
+		}
 	}
 
 	return nil
