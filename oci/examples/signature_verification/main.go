@@ -1,3 +1,4 @@
+// Package main demonstrates basic OCI signature verification using public keys and keyless (OIDC) modes.
 package main
 
 import (
@@ -76,7 +77,7 @@ func main() {
 	fmt.Printf("✓ Artifact extracted to: %s\n", *targetDir)
 }
 
-// createPublicKeyVerifier creates a verifier for public key mode
+// createPublicKeyVerifier creates a verifier for public key mode.
 func createPublicKeyVerifier(keyPath string) (*signature.CosignVerifier, error) {
 	// Load public key from file
 	pubKey, err := signature.LoadPublicKey(keyPath)
@@ -89,7 +90,7 @@ func createPublicKeyVerifier(keyPath string) (*signature.CosignVerifier, error) 
 	return verifier, nil
 }
 
-// createKeylessVerifier creates a verifier for keyless mode
+// createKeylessVerifier creates a verifier for keyless mode.
 func createKeylessVerifier(identityPattern string, enableRekor bool) *signature.CosignVerifier {
 	// Build options based on flags
 	opts := []signature.VerifierOption{
@@ -105,7 +106,7 @@ func createKeylessVerifier(identityPattern string, enableRekor bool) *signature.
 	return verifier
 }
 
-// handleVerificationError provides detailed error information
+// handleVerificationError provides detailed error information.
 func handleVerificationError(err error) {
 	fmt.Println("\n✗ Verification failed!")
 

@@ -2,11 +2,8 @@ package ocibundle
 
 import (
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jmgilman/go/oci/internal/oras"
@@ -216,11 +213,12 @@ func TestClient_VerifierCalledAtCorrectTime(t *testing.T) {
 	ctx := context.Background()
 
 	callCount := 0
-	verifyFunc := func(ctx context.Context, reference string, descriptor *oras.PullDescriptor) error {
+	verifyFunc := func(_ context.Context, _ string, descriptor *oras.PullDescriptor) error {
 		callCount++
 		// Verify we have the descriptor information
 		if descriptor == nil {
 			t.Error("Descriptor should not be nil")
+			return fmt.Errorf("descriptor is nil")
 		}
 		if descriptor.Digest == "" {
 			t.Error("Descriptor digest should not be empty")
@@ -427,10 +425,4 @@ func TestClient_RekorVerificationFailure(t *testing.T) {
 	if !errors.Is(bundleErr.Err, ErrRekorVerificationFailed) {
 		t.Error("Expected ErrRekorVerificationFailed")
 	}
-}
-
-// Mock helper for testing
-func generateTestKey() crypto.PublicKey {
-	privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	return &privateKey.PublicKey
 }

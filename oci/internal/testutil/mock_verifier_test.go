@@ -277,7 +277,7 @@ func TestMockVerifier_BeforeVerify(t *testing.T) {
 	var callbackReference string
 	var callbackDigest string
 
-	verifier.BeforeVerify = func(ctx context.Context, reference string, descriptor *oras.PullDescriptor) {
+	verifier.BeforeVerify = func(_ context.Context, reference string, descriptor *oras.PullDescriptor) {
 		callbackExecuted = true
 		callbackReference = reference
 		callbackDigest = descriptor.Digest

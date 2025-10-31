@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -82,7 +83,7 @@ func (vr *VerificationResult) Size() int64 {
 func (vr *VerificationResult) ToEntry(key string) (*Entry, error) {
 	data, err := json.Marshal(vr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal verification result: %w", err)
 	}
 
 	return &Entry{
@@ -106,7 +107,7 @@ func (vr *VerificationResult) ToEntry(key string) (*Entry, error) {
 func VerificationResultFromEntry(entry *Entry) (*VerificationResult, error) {
 	var result VerificationResult
 	if err := json.Unmarshal(entry.Data, &result); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal verification result: %w", err)
 	}
 	return &result, nil
 }

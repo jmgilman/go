@@ -176,7 +176,11 @@ func TestCoordinator_VerificationCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
-	defer coordinator.Close()
+	t.Cleanup(func() {
+		if closeErr := coordinator.Close(); closeErr != nil {
+			t.Logf("Failed to close coordinator: %v", closeErr)
+		}
+	})
 
 	// Test data
 	digest := "sha256:abc123def456"
@@ -300,7 +304,11 @@ func TestCoordinator_GetVerificationResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
-	defer coordinator.Close()
+	t.Cleanup(func() {
+		if closeErr := coordinator.Close(); closeErr != nil {
+			t.Logf("Failed to close coordinator: %v", closeErr)
+		}
+	})
 
 	result := &VerificationResult{
 		Digest:     "sha256:test123",
@@ -350,7 +358,11 @@ func TestCoordinator_PutVerificationResult_WithRekor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
-	defer coordinator.Close()
+	t.Cleanup(func() {
+		if closeErr := coordinator.Close(); closeErr != nil {
+			t.Logf("Failed to close coordinator: %v", closeErr)
+		}
+	})
 
 	rekorEntry := &RekorLogEntry{
 		LogIndex:       12345,

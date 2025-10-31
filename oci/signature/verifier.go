@@ -4,20 +4,17 @@ package signature
 import (
 	"context"
 	"crypto"
-	"encoding/base64"
-	"encoding/json"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"errors"
 	"fmt"
-	"io"
-	"regexp"
 	"strings"
 
-	"github.com/opencontainers/go-digest"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/sigstore/cosign/v2/pkg/cosign"
 	"github.com/sigstore/cosign/v2/pkg/oci"
-	"github.com/sigstore/cosign/v2/pkg/oci/static"
-	"github.com/sigstore/sigstore/pkg/signature"
 	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry/remote"
 
 	ocibundle "github.com/jmgilman/go/oci"
 	orasint "github.com/jmgilman/go/oci/internal/oras"
@@ -293,14 +290,43 @@ func (v *CosignVerifier) Verify(ctx context.Context, reference string, descripto
 		// Cache errors are logged but don't fail verification (cache is optional)
 	}
 
-	// Build signature reference using Cosign convention
-	signatureRef := v.buildSignatureReference(reference, descriptor.Digest)
-
-	// Fetch signature(s) from the registry
-	signatures, err := v.fetchSignatureArtifacts(ctx, signatureRef)
+	// Convert reference to Cosign's name.Reference type
+	// This supports both tag and digest references
+	ref, err := name.ParseReference(reference)
 	if err != nil {
-		// Use proper error classification instead of string matching
-		if isNotFoundError(err) {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("invalid reference format: %w", err),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       fmt.Sprintf("Failed to parse reference: %s", err.Error()),
+				FailureStage: "validation",
+			},
+		}
+	}
+
+	// Convert policy to Cosign CheckOpts
+	checkOpts, err := policyToCheckOpts(ctx, v.policy)
+	if err != nil {
+		return &ocibundle.BundleError{
+			Op:        "verify",
+			Reference: reference,
+			Err:       fmt.Errorf("failed to create verification options: %w", err),
+			SignatureInfo: &ocibundle.SignatureErrorInfo{
+				Digest:       descriptor.Digest,
+				Reason:       fmt.Sprintf("Failed to configure verification: %s", err.Error()),
+				FailureStage: "policy",
+			},
+		}
+	}
+
+	// Fetch and verify signatures using Cosign's high-level API
+	// This replaces our manual signature discovery and verification
+	verifiedSignatures, _, err := cosign.VerifyImageSignatures(ctx, ref, checkOpts)
+	if err != nil {
+		// Check if error indicates no signatures found
+		if isNotFoundError(err) || strings.Contains(err.Error(), "no matching signatures") {
 			// Signature not found - apply verification mode policy
 			if v.policy.VerificationMode == VerificationModeEnforce {
 				return &ocibundle.BundleError{
@@ -309,7 +335,7 @@ func (v *CosignVerifier) Verify(ctx context.Context, reference string, descripto
 					Err:       ocibundle.ErrSignatureNotFound,
 					SignatureInfo: &ocibundle.SignatureErrorInfo{
 						Digest:       descriptor.Digest,
-						Reason:       fmt.Sprintf("No signature found for artifact (enforce mode). Signature reference: %s", signatureRef),
+						Reason:       fmt.Sprintf("No signature found for artifact (enforce mode): %s", err.Error()),
 						FailureStage: "fetch",
 					},
 				}
@@ -321,20 +347,34 @@ func (v *CosignVerifier) Verify(ctx context.Context, reference string, descripto
 			return nil
 		}
 
-		// Other fetch errors (network, auth, etc.)
+		// Verification failed with an error
+		// Determine if this is a validation error or a fetch error
+		failureStage := "cryptographic"
+		if strings.Contains(err.Error(), "identity") || strings.Contains(err.Error(), "issuer") {
+			failureStage = "identity"
+		} else if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "cert") {
+			failureStage = "certificate"
+		} else if strings.Contains(err.Error(), "rekor") || strings.Contains(err.Error(), "transparency") {
+			failureStage = "rekor"
+		} else if strings.Contains(err.Error(), "annotation") {
+			failureStage = "policy"
+		}
+
 		return &ocibundle.BundleError{
 			Op:        "verify",
 			Reference: reference,
-			Err:       fmt.Errorf("failed to fetch signature: %w", err),
+			Err:       fmt.Errorf("verification failed: %w", err),
 			SignatureInfo: &ocibundle.SignatureErrorInfo{
 				Digest:       descriptor.Digest,
-				Reason:       fmt.Sprintf("Failed to fetch signature artifact: %s", err.Error()),
-				FailureStage: "fetch",
+				Reason:       err.Error(),
+				FailureStage: failureStage,
 			},
 		}
 	}
 
-	if len(signatures) == 0 {
+	// Count verified signatures
+	validCount := len(verifiedSignatures)
+	if validCount == 0 {
 		// No signatures found
 		if v.policy.VerificationMode == VerificationModeEnforce {
 			return &ocibundle.BundleError{
@@ -352,14 +392,14 @@ func (v *CosignVerifier) Verify(ctx context.Context, reference string, descripto
 		return nil
 	}
 
-	// Verify signatures based on policy
-	validCount, err := v.verifySignatures(ctx, descriptor.Digest, signatures)
-	if err != nil {
-		return err // Error already wrapped as BundleError
-	}
-
-	// Check if verification meets policy requirements
-	if err := v.checkSignaturePolicy(validCount, len(signatures), reference, descriptor.Digest); err != nil {
+	// Apply our multi-signature policy logic
+	// Cosign verifies each signature individually, but we need to check
+	// if the number of valid signatures meets our policy requirements
+	// Note: For public key mode with multiple keys, Cosign returns all
+	// signatures that verified with ANY of the keys. We need to apply
+	// our multi-signature logic on top of this.
+	totalSignatures := validCount // Cosign only returns verified signatures
+	if err := v.checkSignaturePolicy(validCount, totalSignatures, reference, descriptor.Digest); err != nil {
 		// Store failed verification in cache (if enabled)
 		v.storeCachedVerification(ctx, descriptor.Digest, false, "")
 		return err
@@ -367,7 +407,7 @@ func (v *CosignVerifier) Verify(ctx context.Context, reference string, descripto
 
 	// Verification succeeded - store result in cache (if enabled)
 	// Extract signer identity if available
-	signer := v.extractSignerIdentity(signatures)
+	signer := v.extractSignerFromVerifiedSignatures(verifiedSignatures)
 	v.storeCachedVerification(ctx, descriptor.Digest, true, signer)
 
 	return nil
@@ -393,353 +433,32 @@ func (v *CosignVerifier) storeCachedVerification(ctx context.Context, digest str
 	}
 }
 
-// extractSignerIdentity extracts the signer identity from verified signatures for audit logging.
+// extractSignerFromVerifiedSignatures extracts the signer identity from Cosign's verified signatures.
 // For keyless signatures, this is typically an email address or OIDC subject.
 // For public key signatures, this returns empty (no identity available).
-func (v *CosignVerifier) extractSignerIdentity(signatures []oci.Signature) string {
+func (v *CosignVerifier) extractSignerFromVerifiedSignatures(signatures []oci.Signature) string {
 	if len(signatures) == 0 {
 		return ""
 	}
 
-	// Use the first valid signature's identity
+	// Use the first signature's certificate to extract identity
+	// In keyless mode, the certificate contains identity information
+	// In public key mode, there's no certificate
 	for _, sig := range signatures {
-		identity := v.extractIdentityFromSignature(sig)
-		if identity != "" {
-			return identity
+		// Try to extract certificate from the signature
+		cert, err := sig.Cert()
+		if err == nil && cert != nil {
+			// Extract identity from certificate
+			identity, err := extractIdentityFromCert(cert)
+			if err == nil && identity != "" {
+				return identity
+			}
 		}
 	}
 
 	return ""
 }
 
-// extractIdentityFromSignature extracts identity from a single signature.
-// For keyless signatures: extracts from certificate (email, URI, etc.)
-// For public key signatures: no identity available (returns empty)
-func (v *CosignVerifier) extractIdentityFromSignature(sig oci.Signature) string {
-	// Check if this is a keyless signature (has a certificate)
-	cert, err := sig.Cert()
-	if err != nil || cert == nil {
-		// Not a keyless signature or error getting cert
-		// Public key signatures don't have certificates
-		return ""
-	}
-
-	// Extract identity from certificate (reuse logic from keyless.go)
-	identity, err := extractIdentityFromCert(cert)
-	if err != nil {
-		// Failed to extract identity
-		return ""
-	}
-
-	return identity
-}
-
-// hexRegex validates that a string contains only lowercase hexadecimal characters
-var hexRegex = regexp.MustCompile(`^[a-f0-9]+$`)
-
-// buildSignatureReference constructs the OCI reference for the signature artifact.
-// Cosign stores signatures as separate artifacts with a predictable naming convention:
-//
-//	Image:     ghcr.io/org/repo:tag              → sha256:abc123...
-//	Signature: ghcr.io/org/repo:sha256-abc123.sig
-//
-// The .sig tag points to the signature artifact that contains the signature data.
-func (v *CosignVerifier) buildSignatureReference(reference, digestStr string) string {
-	// Parse digest string manually for validation (more flexible than digest.Parse)
-	// Expected format: "algorithm:hexstring" (e.g., "sha256:abc123...")
-	parts := strings.SplitN(digestStr, ":", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	algorithm := parts[0]
-	hexPart := parts[1]
-
-	// Validate algorithm is sha256 (required by Cosign)
-	if algorithm != "sha256" {
-		return ""
-	}
-
-	// Validate hex part contains only valid hex characters
-	if !hexRegex.MatchString(hexPart) {
-		return ""
-	}
-
-	// Validate hex part length (protect against excessively long inputs)
-	// Real SHA256 hashes are 64 characters, but we allow flexibility for testing
-	// Maximum of 128 characters prevents DoS via extremely long digest strings
-	if len(hexPart) == 0 || len(hexPart) > 128 {
-		return ""
-	}
-
-	// Extract the repository part (everything before the tag/digest)
-	// Check for @ first (digest reference), then : (tag reference)
-	var repo string
-	if idx := strings.LastIndex(reference, "@"); idx != -1 {
-		repo = reference[:idx]
-	} else if idx := strings.LastIndex(reference, ":"); idx != -1 {
-		// Need to handle port numbers in registry (e.g., localhost:5000/repo:tag)
-		// Find the last : that's after the last /
-		lastSlash := strings.LastIndex(reference, "/")
-		lastColon := strings.LastIndex(reference, ":")
-		if lastColon > lastSlash {
-			repo = reference[:lastColon]
-		} else {
-			repo = reference
-		}
-	} else {
-		repo = reference
-	}
-
-	// Validate repository format (basic OCI naming validation)
-	// Repository must not be empty and should not contain invalid characters
-	if repo == "" || strings.Contains(repo, "..") || strings.HasPrefix(repo, "-") {
-		return ""
-	}
-
-	// Build signature reference: repo:sha256-<digest>.sig
-	signatureRef := fmt.Sprintf("%s:sha256-%s.sig", repo, hexPart)
-
-	// Validate total length (max OCI reference length is typically 255-512 characters)
-	if len(signatureRef) > 512 {
-		return ""
-	}
-
-	return signatureRef
-}
-
-// fetchSignatureArtifacts retrieves signature artifacts from the registry.
-// Returns a list of signature objects or an error if fetching fails.
-func (v *CosignVerifier) fetchSignatureArtifacts(ctx context.Context, signatureRef string) ([]oci.Signature, error) {
-	// Create a basic repository for fetching
-	// Extract registry and repository from reference
-	repo, err := v.createRemoteRepository(signatureRef)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create repository: %w", err)
-	}
-
-	// Fetch the signature manifest
-	manifestDesc, err := repo.Resolve(ctx, signatureRef)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve signature manifest: %w", err)
-	}
-
-	// Fetch the manifest content
-	manifestReader, err := repo.Fetch(ctx, manifestDesc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch signature manifest: %w", err)
-	}
-	defer manifestReader.Close()
-
-	manifestBytes, err := io.ReadAll(manifestReader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read signature manifest: %w", err)
-	}
-
-	// Parse the manifest to extract signature layers
-	var manifest struct {
-		Layers []struct {
-			MediaType   string            `json:"mediaType"`
-			Digest      string            `json:"digest"`
-			Size        int64             `json:"size"`
-			Annotations map[string]string `json:"annotations,omitempty"`
-		} `json:"layers"`
-	}
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return nil, fmt.Errorf("failed to parse signature manifest: %w", err)
-	}
-
-	// Fetch each signature layer
-	signatures := []oci.Signature{}
-	for _, layer := range manifest.Layers {
-		// Fetch the layer (signature payload)
-		layerDesc := manifestDesc
-		layerDesc.Digest = digest.Digest(layer.Digest)
-		layerDesc.Size = layer.Size
-
-		layerReader, err := repo.Fetch(ctx, layerDesc)
-		if err != nil {
-			continue // Skip this signature if we can't fetch it
-		}
-
-		layerBytes, err := io.ReadAll(layerReader)
-		layerReader.Close()
-		if err != nil {
-			continue
-		}
-
-		// Create a static signature object
-		sig, err := static.NewSignature(layerBytes, base64.StdEncoding.EncodeToString([]byte(layer.Digest)))
-		if err != nil {
-			continue
-		}
-
-		signatures = append(signatures, sig)
-	}
-
-	return signatures, nil
-}
-
-// verifySignatures verifies all signatures and returns the count of valid ones.
-// Returns (validCount, error). The error is a wrapped BundleError if verification fails.
-func (v *CosignVerifier) verifySignatures(ctx context.Context, digest string, signatures []oci.Signature) (int, error) {
-	validCount := 0
-	var lastError error
-
-	for _, sig := range signatures {
-		var err error
-		if v.policy.IsKeylessMode() {
-			// Keyless verification
-			err = v.verifyKeylessSignature(ctx, digest, sig)
-		} else {
-			// Public key verification
-			err = v.verifyPublicKeySignature(ctx, digest, sig)
-		}
-
-		if err == nil {
-			validCount++
-			// For "Any" mode, one valid signature is enough
-			if v.policy.MultiSignatureMode == MultiSignatureModeAny {
-				return validCount, nil
-			}
-		} else {
-			lastError = err
-		}
-	}
-
-	// If we need all signatures to be valid and we have invalid ones
-	if v.policy.MultiSignatureMode == MultiSignatureModeAll && validCount < len(signatures) {
-		return validCount, lastError
-	}
-
-	return validCount, nil
-}
-
-// verifyPublicKeySignature verifies a signature using public key cryptography.
-func (v *CosignVerifier) verifyPublicKeySignature(ctx context.Context, digestStr string, sig oci.Signature) error {
-	// Get the signature payload (contains the Simple Signing payload with digest)
-	payload, err := sig.Payload()
-	if err != nil {
-		return fmt.Errorf("failed to get signature payload: %w", err)
-	}
-
-	if len(payload) == 0 {
-		return fmt.Errorf("signature payload is empty")
-	}
-
-	// Parse the payload to verify it contains the expected digest
-	// Structure follows the Cosign Simple Signing format
-	var payloadData struct {
-		Critical struct {
-			Image struct {
-				DockerManifestDigest string `json:"docker-manifest-digest"`
-			} `json:"image"`
-			Type     string `json:"type"`
-			Identity struct {
-				DockerReference string `json:"docker-reference"`
-			} `json:"identity"`
-		} `json:"critical"`
-	}
-
-	if err := json.Unmarshal(payload, &payloadData); err != nil {
-		return fmt.Errorf("failed to parse signature payload: %w", err)
-	}
-
-	// Validate required fields in payload
-	if payloadData.Critical.Image.DockerManifestDigest == "" {
-		return fmt.Errorf("payload missing required field: docker-manifest-digest")
-	}
-
-	// Validate signature type (Cosign Simple Signing format)
-	// Expected: "atomic container signature" or "cosign container image signature"
-	if payloadData.Critical.Type != "" {
-		validTypes := []string{
-			"atomic container signature",
-			"cosign container image signature",
-		}
-		validType := false
-		for _, vt := range validTypes {
-			if payloadData.Critical.Type == vt {
-				validType = true
-				break
-			}
-		}
-		if !validType {
-			return fmt.Errorf("invalid signature type: %q (expected Cosign format)", payloadData.Critical.Type)
-		}
-	}
-
-	// Parse and normalize both digests using OCI digest library
-	artifactDigest, err := digest.Parse(digestStr)
-	if err != nil {
-		return fmt.Errorf("invalid artifact digest: %w", err)
-	}
-
-	payloadDigest, err := digest.Parse(payloadData.Critical.Image.DockerManifestDigest)
-	if err != nil {
-		return fmt.Errorf("invalid payload digest: %w", err)
-	}
-
-	// Verify algorithm is SHA256 (required by OCI spec)
-	if artifactDigest.Algorithm() != digest.SHA256 {
-		return fmt.Errorf("unsupported digest algorithm: %s (required: sha256)", artifactDigest.Algorithm())
-	}
-
-	// Compare normalized digests (handles case differences and format variations)
-	if artifactDigest != payloadDigest {
-		return fmt.Errorf("payload digest %q does not match artifact digest %q",
-			payloadDigest, artifactDigest)
-	}
-
-	// Get the signature bytes
-	sigBytes, err := sig.Base64Signature()
-	if err != nil {
-		return fmt.Errorf("failed to get signature bytes: %w", err)
-	}
-
-	// Decode base64 signature
-	decodedSig, err := base64.StdEncoding.DecodeString(sigBytes)
-	if err != nil {
-		return fmt.Errorf("failed to decode signature: %w", err)
-	}
-
-	// Try to verify with each public key (OR logic by default)
-	var lastErr error
-	for _, pubKey := range v.policy.PublicKeys {
-		// Create a verifier from the public key
-		verifier, err := signature.LoadVerifier(pubKey, crypto.SHA256)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to create verifier: %w", err)
-			continue
-		}
-
-		// Verify the signature
-		if err := verifier.VerifySignature(strings.NewReader(string(decodedSig)), strings.NewReader(string(payload))); err != nil {
-			lastErr = fmt.Errorf("signature verification failed: %w", err)
-			continue
-		}
-
-		// Signature verified successfully with this key
-		// Check annotations if required
-		if len(v.policy.RequiredAnnotations) > 0 {
-			annotations, err := sig.Annotations()
-			if err != nil {
-				return fmt.Errorf("failed to get annotations: %w", err)
-			}
-			if !v.checkAnnotations(annotations) {
-				return fmt.Errorf("required annotations not satisfied")
-			}
-		}
-
-		return nil
-	}
-
-	// No public key successfully verified the signature
-	if lastErr != nil {
-		return fmt.Errorf("signature verification failed with all public keys: %w", lastErr)
-	}
-	return fmt.Errorf("no public keys available for verification")
-}
 
 // checkSignaturePolicy verifies that the number of valid signatures meets policy requirements.
 func (v *CosignVerifier) checkSignaturePolicy(validCount, totalCount int, reference, digest string) error {
@@ -773,6 +492,8 @@ func (v *CosignVerifier) checkSignaturePolicy(validCount, totalCount int, refere
 }
 
 // checkAnnotations verifies that required annotations are present.
+// Note: This function is kept for potential future use, but Cosign's CheckOpts
+// handles annotation validation natively. Consider removing if not needed elsewhere.
 func (v *CosignVerifier) checkAnnotations(annotations map[string]string) bool {
 	for key, requiredValue := range v.policy.RequiredAnnotations {
 		actualValue, exists := annotations[key]
@@ -781,31 +502,6 @@ func (v *CosignVerifier) checkAnnotations(annotations map[string]string) bool {
 		}
 	}
 	return true
-}
-
-// createRemoteRepository creates a remote repository for the given reference.
-func (v *CosignVerifier) createRemoteRepository(ref string) (*remote.Repository, error) {
-	// Extract registry and repository from reference
-	// Format: registry/repository:tag
-	parts := strings.SplitN(ref, "/", 2)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid reference format: %s", ref)
-	}
-
-	registry := parts[0]
-	repoAndTag := parts[1]
-
-	// Extract repository (remove tag if present)
-	repoParts := strings.Split(repoAndTag, ":")
-	repository := repoParts[0]
-
-	// Create remote repository
-	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", registry, repository))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create remote repository: %w", err)
-	}
-
-	return repo, nil
 }
 
 // Policy returns a copy of the verification policy.
@@ -844,4 +540,36 @@ func isNotFoundError(err error) bool {
 		strings.Contains(errStr, "manifest unknown") ||
 		strings.Contains(errStr, "404") ||
 		strings.Contains(errStr, "no such")
+}
+
+// validateKeyStrength validates that a public key meets minimum security requirements.
+// This prevents the use of weak cryptographic keys that could be compromised.
+//
+// Requirements:
+//   - RSA keys: minimum 2048 bits (3072+ recommended)
+//   - ECDSA keys: minimum P-256 curve (256 bits)
+//   - Ed25519 keys: always 256 bits (adequate)
+func validateKeyStrength(pubKey crypto.PublicKey) error {
+	switch k := pubKey.(type) {
+	case *rsa.PublicKey:
+		keySize := k.N.BitLen()
+		if keySize < 2048 {
+			return fmt.Errorf("RSA key size too small: %d bits (minimum: 2048)", keySize)
+		}
+		return nil
+
+	case *ecdsa.PublicKey:
+		curveSize := k.Curve.Params().BitSize
+		if curveSize < 256 {
+			return fmt.Errorf("ECDSA curve too weak: %d bits (minimum: 256)", curveSize)
+		}
+		return nil
+
+	case ed25519.PublicKey:
+		// Ed25519 is always 256 bits - adequate strength
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported key type: %T", pubKey)
+	}
 }

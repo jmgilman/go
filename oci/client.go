@@ -431,10 +431,11 @@ func (c *Client) verifySignature(ctx context.Context, reference string, descript
 
 	// Call the verifier implementation
 	if err := c.options.SignatureVerifier.Verify(ctx, reference, descriptor); err != nil {
-		// If the error is already a BundleError, return it as-is
+		// If the error is already a BundleError, return it directly
+		// (no additional wrapping needed as it already contains full context)
 		var bundleErr *BundleError
 		if errors.As(err, &bundleErr) {
-			return err
+			return fmt.Errorf("signature verification failed: %w", err)
 		}
 
 		// Otherwise, wrap it in a BundleError for consistency

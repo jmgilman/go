@@ -1,3 +1,4 @@
+// Package main demonstrates advanced OCI signature verification features including multi-signature policies, annotations, Rekor integration, and caching.
 package main
 
 import (
@@ -69,7 +70,7 @@ func main() {
 	}
 }
 
-// runMultiSignatureExample demonstrates multi-signature verification
+// runMultiSignatureExample demonstrates multi-signature verification.
 func runMultiSignatureExample(ctx context.Context, keyPaths string, requireAll bool, minSigs int, reference, targetDir string) {
 	fmt.Println("=== Multi-Signature Verification Example ===")
 
@@ -112,7 +113,7 @@ func runMultiSignatureExample(ctx context.Context, keyPaths string, requireAll b
 	pullAndExtract(ctx, verifier, reference, targetDir)
 }
 
-// runAnnotationPolicyExample demonstrates annotation-based policies
+// runAnnotationPolicyExample demonstrates annotation-based policies.
 func runAnnotationPolicyExample(ctx context.Context, identity, annotationsStr, reference, targetDir string) {
 	fmt.Println("=== Annotation Policy Example ===")
 
@@ -150,7 +151,7 @@ func runAnnotationPolicyExample(ctx context.Context, identity, annotationsStr, r
 	pullAndExtract(ctx, verifier, reference, targetDir)
 }
 
-// runRekorExample demonstrates Rekor transparency log integration
+// runRekorExample demonstrates Rekor transparency log integration.
 func runRekorExample(ctx context.Context, identity, issuer, rekorURL, reference, targetDir string) {
 	fmt.Println("=== Rekor Transparency Log Example ===")
 
@@ -189,7 +190,7 @@ func runRekorExample(ctx context.Context, identity, issuer, rekorURL, reference,
 	pullAndExtract(ctx, verifier, reference, targetDir)
 }
 
-// runCachingExample demonstrates verification result caching
+// runCachingExample demonstrates verification result caching.
 func runCachingExample(ctx context.Context, identity, cacheDir string, cacheTTL time.Duration, reference, targetDir string) {
 	fmt.Println("=== Verification Caching Example ===")
 
@@ -211,7 +212,11 @@ func runCachingExample(ctx context.Context, identity, cacheDir string, cacheTTL 
 	if err != nil {
 		log.Fatalf("Failed to create cache: %v", err)
 	}
-	defer coordinator.Close()
+	defer func() {
+		if closeErr := coordinator.Close(); closeErr != nil {
+			log.Printf("Failed to close cache coordinator: %v", closeErr)
+		}
+	}()
 
 	// Create verifier with caching
 	verifier := signature.NewKeylessVerifier(
@@ -265,7 +270,7 @@ func runCachingExample(ctx context.Context, identity, cacheDir string, cacheTTL 
 	fmt.Printf("  Second extraction: %s\n", targetDir2)
 }
 
-// pullAndExtract is a helper to pull and extract with a given verifier
+// pullAndExtract is a helper to pull and extract with a given verifier.
 func pullAndExtract(ctx context.Context, verifier *signature.CosignVerifier, reference, targetDir string) {
 	fmt.Printf("Pulling: %s\n", reference)
 	fmt.Printf("Target: %s\n\n", targetDir)
@@ -289,7 +294,7 @@ func pullAndExtract(ctx context.Context, verifier *signature.CosignVerifier, ref
 	fmt.Printf("✓ Artifact extracted to: %s\n", targetDir)
 }
 
-// handleError provides detailed error information
+// handleError provides detailed error information.
 func handleError(err error) {
 	fmt.Println("\n✗ Verification failed!")
 

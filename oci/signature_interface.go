@@ -33,7 +33,7 @@ import (
 //	    return err
 //	}
 //
-//	// Create verifier
+//	// Create signature verifier instance
 //	verifier := signature.NewPublicKeyVerifier(pubKey)
 //
 //	// Create client with verifier

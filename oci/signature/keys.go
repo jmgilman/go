@@ -117,13 +117,18 @@ func parsePublicKeyDER(der []byte, pemType string) (crypto.PublicKey, error) {
 	return nil, fmt.Errorf("unable to parse public key: not a valid PKIX or PKCS#1 format")
 }
 
-// validatePublicKey ensures the parsed key is of a supported type.
-// Returns the key if valid, or an error if the type is unsupported.
+// validatePublicKey ensures the parsed key is of a supported type and has adequate strength.
+// Returns the key if valid, or an error if the type is unsupported or key is too weak.
 func validatePublicKey(key any) (crypto.PublicKey, error) {
 	switch pub := key.(type) {
 	case *rsa.PublicKey:
 		if pub.N == nil {
 			return nil, fmt.Errorf("invalid RSA public key: missing modulus")
+		}
+		// Validate RSA key strength (minimum 2048 bits for security)
+		keySize := pub.N.BitLen()
+		if keySize < 2048 {
+			return nil, fmt.Errorf("RSA key size too small: %d bits (minimum: 2048)", keySize)
 		}
 		return pub, nil
 
@@ -131,12 +136,18 @@ func validatePublicKey(key any) (crypto.PublicKey, error) {
 		if pub.X == nil || pub.Y == nil {
 			return nil, fmt.Errorf("invalid ECDSA public key: missing curve points")
 		}
+		// Validate ECDSA curve strength (minimum P-256, which is 256 bits)
+		curveSize := pub.Curve.Params().BitSize
+		if curveSize < 256 {
+			return nil, fmt.Errorf("ECDSA curve too weak: %d bits (minimum: 256)", curveSize)
+		}
 		return pub, nil
 
 	case ed25519.PublicKey:
 		if len(pub) != ed25519.PublicKeySize {
 			return nil, fmt.Errorf("invalid Ed25519 public key: wrong size (got %d, expected %d)", len(pub), ed25519.PublicKeySize)
 		}
+		// Ed25519 is always 256 bits - adequate strength
 		return pub, nil
 
 	default:

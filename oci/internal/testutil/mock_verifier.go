@@ -11,7 +11,7 @@ import (
 	"github.com/jmgilman/go/oci/internal/oras"
 )
 
-// Signature error sentinel values (duplicated from main package to avoid import cycle)
+// Signature error sentinel values (duplicated from main package to avoid import cycle).
 var (
 	ErrSignatureNotFound          = errors.New("signature not found")
 	ErrSignatureInvalid           = errors.New("signature verification failed")
@@ -66,9 +66,9 @@ type MockVerifier struct {
 	BeforeVerify func(ctx context.Context, reference string, descriptor *oras.PullDescriptor)
 }
 
-// VerifyCall represents a single call to Verify()
+// VerifyCall represents a single call to Verify().
 type VerifyCall struct {
-	Context    context.Context
+	// Context is intentionally omitted as storing context.Context in structs is discouraged
 	Reference  string
 	Descriptor *oras.PullDescriptor
 }
@@ -128,9 +128,8 @@ func (m *MockVerifier) Verify(ctx context.Context, reference string, descriptor 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Record the call
+	// Record the call (context omitted as it should not be stored in structs)
 	m.VerifyCalls = append(m.VerifyCalls, VerifyCall{
-		Context:    ctx,
 		Reference:  reference,
 		Descriptor: descriptor,
 	})
@@ -287,13 +286,12 @@ type TrackingVerifier struct {
 
 // Verify implements the SignatureVerifier interface.
 // It returns results from the Results slice in sequence.
-func (t *TrackingVerifier) Verify(ctx context.Context, reference string, descriptor *oras.PullDescriptor) error {
+func (t *TrackingVerifier) Verify(_ context.Context, reference string, descriptor *oras.PullDescriptor) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Record the call
+	// Record the call (context omitted as it should not be stored in structs)
 	t.VerifyCalls = append(t.VerifyCalls, VerifyCall{
-		Context:    ctx,
 		Reference:  reference,
 		Descriptor: descriptor,
 	})

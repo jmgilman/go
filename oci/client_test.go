@@ -651,7 +651,7 @@ func TestClient_Pull_WithMockORASClient(t *testing.T) {
 
 	// Create a mock ORAS client using the generated mock
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			// Return mock tar.gz data instead of making network calls
 			return &oras.PullDescriptor{
 				MediaType: "application/tar+gzip",
@@ -708,7 +708,7 @@ func TestClient_Push_WithMockORASClient(t *testing.T) {
 func TestClient_Pull_WithMockError(t *testing.T) {
 	// Create a mock ORAS client that simulates an error
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			return nil, fmt.Errorf("simulated network error")
 		},
 	}
@@ -800,7 +800,7 @@ func TestClient_WithMemFS_PushAndPull_WithMocks(t *testing.T) {
 			_, _ = io.Copy(io.Discard, descriptor.Data)
 			return nil
 		},
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			// Build a tiny tar.gz with a single file
 			var buf bytes.Buffer
 			gz := gzip.NewWriter(&buf)
@@ -834,13 +834,13 @@ func TestClient_WithMemFS_PushAndPull_WithMocks(t *testing.T) {
 	assert.Equal(t, []byte("hi"), b)
 }
 
-// TestClient_Pull_WithNilVerifier tests that Pull works without signature verification
+// TestClient_Pull_WithNilVerifier tests that Pull works without signature verification.
 func TestClient_Pull_WithNilVerifier(t *testing.T) {
 	mockTarGzData, err := createMockTarGzData()
 	require.NoError(t, err)
 
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			return &oras.PullDescriptor{
 				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 				Data:      &mockReadCloserForTest{data: mockTarGzData},
@@ -870,13 +870,13 @@ func TestClient_Pull_WithNilVerifier(t *testing.T) {
 	assert.NotEmpty(t, entries)
 }
 
-// TestClient_Pull_WithSuccessVerifier tests that Pull succeeds when verifier returns success
+// TestClient_Pull_WithSuccessVerifier tests that Pull succeeds when verifier returns success.
 func TestClient_Pull_WithSuccessVerifier(t *testing.T) {
 	mockTarGzData, err := createMockTarGzData()
 	require.NoError(t, err)
 
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			return &oras.PullDescriptor{
 				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 				Data:      &mockReadCloserForTest{data: mockTarGzData},
@@ -916,13 +916,13 @@ func TestClient_Pull_WithSuccessVerifier(t *testing.T) {
 	assert.NotEmpty(t, entries)
 }
 
-// TestClient_Pull_WithFailureVerifier tests that Pull fails when verifier returns error
+// TestClient_Pull_WithFailureVerifier tests that Pull fails when verifier returns error.
 func TestClient_Pull_WithFailureVerifier(t *testing.T) {
 	mockTarGzData, err := createMockTarGzData()
 	require.NoError(t, err)
 
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			return &oras.PullDescriptor{
 				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 				Data:      &mockReadCloserForTest{data: mockTarGzData},
@@ -978,13 +978,13 @@ func TestClient_Pull_WithFailureVerifier(t *testing.T) {
 	assert.Empty(t, entries, "Target directory should be empty when verification fails")
 }
 
-// TestClient_Pull_VerificationErrorsNotRetried tests that signature errors are not retried
+// TestClient_Pull_VerificationErrorsNotRetried tests that signature errors are not retried.
 func TestClient_Pull_VerificationErrorsNotRetried(t *testing.T) {
 	mockTarGzData, err := createMockTarGzData()
 	require.NoError(t, err)
 
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			return &oras.PullDescriptor{
 				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 				Data:      &mockReadCloserForTest{data: mockTarGzData},
@@ -1021,7 +1021,7 @@ func TestClient_Pull_VerificationErrorsNotRetried(t *testing.T) {
 	assert.Equal(t, 1, len(verifier.VerifyCalls), "Signature errors should not be retried")
 }
 
-// TestClient_Pull_DescriptorDataClosedOnVerificationFailure tests that descriptor.Data is closed on verification failure
+// TestClient_Pull_DescriptorDataClosedOnVerificationFailure tests that descriptor.Data is closed on verification failure.
 func TestClient_Pull_DescriptorDataClosedOnVerificationFailure(t *testing.T) {
 	mockTarGzData, err := createMockTarGzData()
 	require.NoError(t, err)
@@ -1030,7 +1030,7 @@ func TestClient_Pull_DescriptorDataClosedOnVerificationFailure(t *testing.T) {
 	closeCalled := false
 
 	mockORAS := &mocks.ClientMock{
-		PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+		PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 			return &oras.PullDescriptor{
 				MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 				Data: &testReadCloserWithTracking{
@@ -1067,7 +1067,7 @@ func TestClient_Pull_DescriptorDataClosedOnVerificationFailure(t *testing.T) {
 	assert.True(t, closeCalled, "descriptor.Data should be closed on verification failure")
 }
 
-// TestClient_Pull_SignatureErrorTypes tests different signature error types
+// TestClient_Pull_SignatureErrorTypes tests different signature error types.
 func TestClient_Pull_SignatureErrorTypes(t *testing.T) {
 	testCases := []struct {
 		name          string
@@ -1124,7 +1124,7 @@ func TestClient_Pull_SignatureErrorTypes(t *testing.T) {
 			require.NoError(t, err)
 
 			mockORAS := &mocks.ClientMock{
-				PullFunc: func(ctx context.Context, reference string, opts *oras.AuthOptions) (*oras.PullDescriptor, error) {
+				PullFunc: func(_ context.Context, _ string, _ *oras.AuthOptions) (*oras.PullDescriptor, error) {
 					return &oras.PullDescriptor{
 						MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
 						Data:      &mockReadCloserForTest{data: mockTarGzData},
@@ -1164,7 +1164,7 @@ func TestClient_Pull_SignatureErrorTypes(t *testing.T) {
 	}
 }
 
-// testReadCloserWithTracking wraps a ReadCloser and tracks if Close() was called
+// testReadCloserWithTracking wraps a ReadCloser and tracks if Close() was called.
 type testReadCloserWithTracking struct {
 	data        []byte
 	offset      int

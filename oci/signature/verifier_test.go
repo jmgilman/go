@@ -299,45 +299,9 @@ func TestLoadPublicKeyFromFile(t *testing.T) {
 	}
 }
 
-// TestBuildSignatureReference tests the signature reference construction
-func TestBuildSignatureReference(t *testing.T) {
-	verifier := NewKeylessVerifier()
-
-	tests := []struct {
-		name      string
-		reference string
-		digest    string
-		want      string
-	}{
-		{
-			name:      "reference with tag",
-			reference: "ghcr.io/org/repo:v1.0.0",
-			digest:    "sha256:abc123",
-			want:      "ghcr.io/org/repo:sha256-abc123.sig",
-		},
-		{
-			name:      "reference with digest",
-			reference: "ghcr.io/org/repo@sha256:abc123",
-			digest:    "sha256:abc123",
-			want:      "ghcr.io/org/repo:sha256-abc123.sig",
-		},
-		{
-			name:      "reference without tag",
-			reference: "ghcr.io/org/repo",
-			digest:    "sha256:def456",
-			want:      "ghcr.io/org/repo:sha256-def456.sig",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := verifier.buildSignatureReference(tt.reference, tt.digest)
-			if got != tt.want {
-				t.Errorf("buildSignatureReference() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
+// Note: TestBuildSignatureReference has been removed because signature reference
+// construction is now handled internally by Cosign's VerifyImageSignatures API.
+// This was an implementation detail that is no longer exposed.
 
 // TestVerifyInterface tests that CosignVerifier implements the SignatureVerifier interface
 func TestVerifyInterface(t *testing.T) {
