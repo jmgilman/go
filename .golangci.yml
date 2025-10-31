@@ -1,0 +1,165 @@
+# Validate against the v2 schema (recommended by docs)
+# https://golangci-lint.run/docs/configuration/file/
+version: "2"
+
+# --- Formatters (new in v2): checked during `run`, fixable with `--fix` or via `golangci-lint fmt`
+# https://golangci-lint.run/docs/formatters/  https://golangci-lint.run/docs/formatters/configuration/
+formatters:
+  settings:
+    gofumpt:
+      module-path: github.com/jmgilman/sow/cli
+      extra-rules: true
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/jmgilman/sow)
+        - blank
+        - alias
+        - localmodule
+      no-inline-comments: true
+      no-prefix-comments: true
+      custom-order: true
+
+# --- Linters
+# Linters list & settings live here: https://golangci-lint.run/docs/linters/ and /docs/linters/configuration/
+linters:
+  # Start from the standard set, then enable a curated group that maps to your guide.
+  default: standard
+  exclusions:
+    rules:
+      # Need to return unwrapped file errors
+      - path: ^file\.go$
+        linters:
+          - wrapcheck
+      - path: ^billy\.go$
+        linters:
+          - wrapcheck
+      # Command layer errors - domain layer already provides context
+      - path: ^cmd/
+        linters:
+          - wrapcheck
+      # Internal domain packages - errors are already descriptive
+      - path: ^internal/sow/
+        linters:
+          - wrapcheck
+      # Statechart persistence layer
+      - path: ^internal/statechart/persistence\.go$
+        linters:
+          - wrapcheck
+      # Complexity warnings are acceptable for output formatting
+      - path: ^cmd/session_info\.go$
+        linters:
+          - nestif
+      # Type assertion complexity in finalize methods is acceptable
+      - path: ^internal/sow/project\.go$
+        linters:
+          - nestif
+      # Command handlers have inherent branching complexity
+      - path: ^cmd/explore\.go$
+        linters:
+          - nestif
+      - path: ^cmd/project\.go$
+        linters:
+          - nestif
+      # CUE-generated types use underscores to match JSON schema
+      - path: schemas/cue_types_gen\.go$
+        linters:
+          - revive
+      # Structs matching CUE schema types need underscores for JSON compatibility
+      - text: "var-naming: don't use underscores in Go names"
+        linters:
+          - revive
+  enable:
+    # errors
+    - errcheck # no unchecked errors
+    - errorlint # require %w, errors.Is/As
+    - wrapcheck # ensure external errors are wrapped (configured below)
+    # contexts
+    - containedctx # forbid storing context in structs
+    - contextcheck # forbid non-inherited contexts
+    - noctx # require context-aware calls when available
+    - fatcontext # catch heavy values in context
+    # logging / stdlib updates
+    - sloglint # enforce consistent log/slog usage
+    # api & allocation hygiene
+    - staticcheck # high-signal checks
+    - govet # vet checks
+    - ineffassign
+    - unused
+    - unparam
+    - forcetypeassert
+    - rowserrcheck
+    - sqlclosecheck
+    - bodyclose
+    # packages/imports
+    - importas # enforce canonical import aliases
+    # complexity & readability (tuned)
+    # - gocyclo  # Disabled: CLI command handlers have inherent complexity
+    # - cyclop   # Disabled: CLI command handlers have inherent complexity
+    - funlen
+    - nestif
+    - dupword
+    - misspell
+    - godot # sentence-ending periods in comments
+    - revive # light style rules (defaults)
+  settings:
+    # Error wrapping: allow common non-wrapping return sites to avoid noise (tweak as your codebase needs)
+    # See: https://golangci-lint.run/docs/linters/configuration/#wrapcheck
+    wrapcheck:
+      # Extend, don't replace, the default ignore list.
+      extra-ignore-sigs:
+        - .Error() error
+    # Complexity thresholds (kept reasonable to reduce false positives)
+    funlen:
+      lines: 120
+      statements: 60
+
+# --- Issues output & adoption knobs
+# https://golangci-lint.run/docs/configuration/file/#issues-configuration
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: true # only report new issues (keeps adoption sane in large repos)
+  new-from-merge-base: master
+
+# --- Output options (handy for CI)
+# https://golangci-lint.run/docs/configuration/file/#output-configuration
+output:
+  sort-order:
+    - linter
+    - severity
+    - file
+  show-stats: true
+
+# --- Runner behavior
+# https://golangci-lint.run/docs/configuration/file/#run-configuration  https://golangci-lint.run/docs/configuration/cli/
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+  allow-parallel-runners: true
+  concurrency: 0 # auto
+
+# --- Severity mapping (optional)
+# https://golangci-lint.run/docs/configuration/file/#severity-configuration
+severity:
+  default: error
+  rules:
+    - linters:
+        [
+          errcheck,
+          errorlint,
+          wrapcheck,
+          staticcheck,
+          govet,
+          containedctx,
+          contextcheck,
+          noctx,
+          sloglint,
+          depguard,
+        ]
+      severity: error
+    - linters: [funlen, nestif, dupword, misspell, revive]
+      severity: warning

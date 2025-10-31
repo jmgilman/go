@@ -1,4 +1,4 @@
-module custom-archiver
+module selective_extraction
 
 go 1.24.2
 

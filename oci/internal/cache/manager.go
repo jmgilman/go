@@ -108,8 +108,13 @@ func (cm *Coordinator) initializeCaches(ctx context.Context) error {
 	}
 	cm.blobCache = blobCache
 
-	// Initialize tag cache - simplified for now
-	cm.tagCache = &tagResolver{} // Placeholder implementation
+	// Initialize tag cache with proper implementation
+	tagConfig := TagResolverConfig{
+		DefaultTTL:     cm.config.DefaultTTL,
+		MaxHistorySize: 10,
+		EnableHistory:  true,
+	}
+	cm.tagCache = NewTagCache(cm.storage, tagConfig)
 
 	return nil
 }
@@ -453,6 +458,121 @@ func (cm *Coordinator) PutBlob(
 	return nil
 }
 
+// GetTagMapping retrieves a tag-to-digest mapping from the cache.
+// Returns the mapping if it exists and hasn't expired, error otherwise.
+func (cm *Coordinator) GetTagMapping(
+	ctx context.Context,
+	reference string,
+) (*TagMapping, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	mapping, err := cm.tagCache.GetTagMapping(ctx, reference)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tag mapping: %w", err)
+	}
+	return mapping, nil
+}
+
+// PutTagMapping stores a tag-to-digest mapping in the cache.
+// Creates history entries when updating existing mappings.
+func (cm *Coordinator) PutTagMapping(
+	ctx context.Context,
+	reference string,
+	digest string,
+) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if err := cm.tagCache.PutTagMapping(ctx, reference, digest); err != nil {
+		return fmt.Errorf("failed to put tag mapping: %w", err)
+	}
+	return nil
+}
+
+// HasTagMapping checks if a tag mapping exists and hasn't expired.
+func (cm *Coordinator) HasTagMapping(
+	ctx context.Context,
+	reference string,
+) (bool, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	has, err := cm.tagCache.HasTagMapping(ctx, reference)
+	if err != nil {
+		return false, fmt.Errorf("failed to check tag mapping: %w", err)
+	}
+	return has, nil
+}
+
+// GetTOC retrieves a cached Table of Contents for the given blob digest.
+// Returns nil if not found or expired.
+func (cm *Coordinator) GetTOC(
+	ctx context.Context,
+	digest string,
+) (*TOCCacheEntry, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// Generate cache key for TOC
+	key := fmt.Sprintf("toc:%s", digest)
+
+	// Check if entry exists
+	entry, err := cm.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse TOC entry from cached data
+	tocEntry := &TOCCacheEntry{
+		Digest:     digest,
+		TOCData:    entry.Data,
+		CreatedAt:  entry.CreatedAt,
+		AccessedAt: entry.AccessedAt,
+		TTL:        entry.TTL,
+	}
+
+	// Extract metadata
+	if fileCount, ok := entry.Metadata["file_count"]; ok {
+		fmt.Sscanf(fileCount, "%d", &tocEntry.FileCount) //nolint:errcheck
+	}
+	if totalSize, ok := entry.Metadata["total_size"]; ok {
+		fmt.Sscanf(totalSize, "%d", &tocEntry.TotalSize) //nolint:errcheck
+	}
+
+	return tocEntry, nil
+}
+
+// PutTOC caches a Table of Contents for the given blob digest.
+func (cm *Coordinator) PutTOC(
+	ctx context.Context,
+	tocEntry *TOCCacheEntry,
+) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// Generate cache key for TOC
+	key := fmt.Sprintf("toc:%s", tocEntry.Digest)
+
+	// Create cache entry
+	entry := &Entry{
+		Key:        key,
+		Data:       tocEntry.TOCData,
+		CreatedAt:  time.Now(),
+		AccessedAt: time.Now(),
+		TTL:        tocEntry.TTL,
+		Metadata: map[string]string{
+			"type":       "toc",
+			"digest":     tocEntry.Digest,
+			"file_count": fmt.Sprintf("%d", tocEntry.FileCount),
+			"total_size": fmt.Sprintf("%d", tocEntry.TotalSize),
+		},
+	}
+
+	// Store in cache
+	return cm.Put(ctx, key, entry)
+}
+
 // Size returns the total size of all cached entries.
 func (cm *Coordinator) Size(ctx context.Context) (int64, error) {
 	cm.mu.RLock()
@@ -475,6 +595,71 @@ func (cm *Coordinator) Clear(ctx context.Context) error {
 	}
 
 	return cm.index.Persist()
+}
+
+// Get retrieves a cache entry by key (implements Cache interface).
+// This is a generic accessor that works with any cache key type.
+func (cm *Coordinator) Get(_ context.Context, key string) (*Entry, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	// Check if entry exists in index
+	indexEntry, found := cm.index.Get(key)
+	if !found {
+		return nil, fmt.Errorf("cache entry not found: %s", key)
+	}
+
+	// Check if expired
+	if indexEntry.IsExpired() {
+		return nil, ErrCacheExpired
+	}
+
+	// Construct entry from index metadata
+	entry := &Entry{
+		Key:         key,
+		Data:        nil, // Generic Get doesn't load actual data
+		Metadata:    indexEntry.Metadata,
+		CreatedAt:   indexEntry.CreatedAt,
+		AccessedAt:  indexEntry.AccessedAt,
+		TTL:         indexEntry.TTL,
+		AccessCount: indexEntry.AccessCount,
+	}
+
+	// Update access time
+	indexEntry.AccessedAt = time.Now()
+	indexEntry.AccessCount++
+	_ = cm.index.Put(key, indexEntry)
+
+	return entry, nil
+}
+
+// Put stores a cache entry (implements Cache interface).
+// This is a generic setter that works with any cache entry.
+func (cm *Coordinator) Put(_ context.Context, key string, entry *Entry) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// Create index entry
+	indexEntry := &IndexEntry{
+		Key:         key,
+		Size:        int64(len(entry.Data)),
+		CreatedAt:   entry.CreatedAt,
+		AccessedAt:  entry.AccessedAt,
+		TTL:         entry.TTL,
+		Metadata:    entry.Metadata,
+		AccessCount: entry.AccessCount,
+	}
+
+	// Add to index
+	return cm.index.Put(key, indexEntry)
+}
+
+// Delete removes a cache entry by key (implements Cache interface).
+func (cm *Coordinator) Delete(ctx context.Context, key string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	return cm.deleteEntry(ctx, key)
 }
 
 // deleteEntry removes an entry from the index.
@@ -560,32 +745,4 @@ type Stats struct {
 	Errors             int64     `json:"total_errors"`
 	LastCompaction     time.Time `json:"last_compaction"`
 	AverageAccessCount float64   `json:"average_access_count"`
-}
-
-// tagResolver is a placeholder implementation of TagCache for the manager.
-// TODO: Replace with proper implementation when TagResolver is available.
-type tagResolver struct{}
-
-func (tr *tagResolver) GetTagMapping(ctx context.Context, reference string) (*TagMapping, error) {
-	return nil, fmt.Errorf("tag cache not implemented")
-}
-
-func (tr *tagResolver) PutTagMapping(ctx context.Context, reference, digest string) error {
-	return fmt.Errorf("tag cache not implemented")
-}
-
-func (tr *tagResolver) HasTagMapping(ctx context.Context, reference string) (bool, error) {
-	return false, nil
-}
-
-func (tr *tagResolver) DeleteTagMapping(ctx context.Context, reference string) error {
-	return fmt.Errorf("tag cache not implemented")
-}
-
-func (tr *tagResolver) GetTagHistory(ctx context.Context, reference string) ([]TagHistoryEntry, error) {
-	return nil, fmt.Errorf("tag cache not implemented")
-}
-
-func (tr *tagResolver) Clear(ctx context.Context) error {
-	return nil
 }

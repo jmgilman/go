@@ -15,6 +15,99 @@ import (
 	validatepkg "github.com/jmgilman/go/oci/internal/validate"
 )
 
+// newDefaultValidatorChain creates a validator chain with default security validators.
+func newDefaultValidatorChain(opts ExtractOptions) *ValidatorChain {
+	return NewValidatorChain(
+		NewSizeValidator(opts.MaxFileSize, opts.MaxSize),
+		NewFileCountValidator(opts.MaxFiles),
+		NewPermissionSanitizer(),
+	)
+}
+
+// matchesAnyPattern checks if a file path matches at least one of the provided glob patterns.
+func matchesAnyPattern(path string, patterns []string) bool {
+	// Empty patterns means extract everything
+	if len(patterns) == 0 {
+		return true
+	}
+
+	// Normalize path to use forward slashes for consistent matching
+	normalizedPath := filepath.ToSlash(path)
+
+	for _, pattern := range patterns {
+		if matchesPattern(normalizedPath, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchesPattern checks if a path matches a single glob pattern.
+// Supports ** for recursive directory matching.
+func matchesPattern(path, pattern string) bool {
+	// Normalize pattern to use forward slashes
+	pattern = filepath.ToSlash(pattern)
+
+	// Handle ** (recursive directory wildcard)
+	if strings.Contains(pattern, "**") {
+		return matchesRecursivePattern(path, pattern)
+	}
+
+	// Use standard filepath matching for simple patterns
+	matched, err := filepath.Match(pattern, path)
+	if err != nil {
+		// Invalid pattern, don't match
+		return false
+	}
+	return matched
+}
+
+// matchesRecursivePattern handles patterns containing ** for recursive matching.
+// Example: "data/**/*.txt" matches "data/file.txt", "data/sub/file.txt", etc.
+func matchesRecursivePattern(path, pattern string) bool {
+	// Split pattern on **
+	parts := strings.Split(pattern, "**")
+	if len(parts) == 1 {
+		// No ** found, shouldn't happen but handle gracefully
+		matched, _ := filepath.Match(pattern, path)
+		return matched
+	}
+
+	// For simplicity, we'll handle the most common case: prefix/**/suffix
+	// More complex patterns with multiple ** can be added later if needed
+	prefix := strings.TrimSuffix(parts[0], "/")
+	suffix := strings.TrimPrefix(parts[len(parts)-1], "/")
+
+	// Check prefix match
+	if prefix != "" {
+		if !strings.HasPrefix(path, prefix) {
+			return false
+		}
+		// Remove prefix from path for suffix matching
+		path = strings.TrimPrefix(path, prefix)
+		path = strings.TrimPrefix(path, "/")
+	}
+
+	// Check suffix match
+	if suffix != "" {
+		// Extract the remaining path after removing any intermediate directories
+		// and check if it matches the suffix pattern
+		pathParts := strings.Split(path, "/")
+		for i := 0; i < len(pathParts); i++ {
+			remainingPath := strings.Join(pathParts[i:], "/")
+			matched, err := filepath.Match(suffix, remainingPath)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
+	}
+
+	// If there's only a prefix (pattern ends with **), match anything under it
+	return true
+}
+
 // collectFileInfos walks the source directory and returns all entries with
 // their original path, relative path, and os.FileInfo.
 func collectFileInfos(fsys core.FS, sourceDir string) ([]fileInfoEntry, error) {
@@ -113,6 +206,15 @@ func writeArchiveEntry(
 	return nil
 }
 
+// stripPrefix removes the specified prefix from a path and trims leading slashes.
+func stripPrefix(path, prefix string) string {
+	if prefix != "" && strings.HasPrefix(path, prefix) {
+		path = strings.TrimPrefix(path, prefix)
+		path = strings.TrimPrefix(path, "/")
+	}
+	return path
+}
+
 // isDone returns a wrapped context cancellation error if ctx is done.
 func isDone(ctx context.Context, action string) error {
 	select {
@@ -162,12 +264,24 @@ func handleHeader(
 		return err
 	}
 
-	*fileCount++
-
 	fullPath, err := normalizeAndResolvePath(pv, hdr.Name, opts.StripPrefix, targetDir, rootAbs)
 	if err != nil {
 		return err
 	}
+
+	// Check if file matches selective extraction patterns (if specified)
+	pathForMatching := stripPrefix(hdr.Name, opts.StripPrefix)
+
+	// For selective extraction: skip files that don't match patterns
+	// Always include directories (they're needed for nested files)
+	if len(opts.FilesToExtract) > 0 && hdr.Typeflag != tar.TypeDir {
+		if !matchesAnyPattern(pathForMatching, opts.FilesToExtract) {
+			return nil
+		}
+	}
+
+	// Now that we know we're processing this file, increment the count
+	*fileCount++
 
 	if err := validateFileAndArchive(validators, hdr, opts, totalSize, fileCount); err != nil {
 		return err
@@ -184,7 +298,7 @@ func handleHeader(
 func normalizeAndResolvePath(
 	pv *validatepkg.PathTraversalValidator,
 	headerName string,
-	stripPrefix string,
+	prefixToStrip string,
 	targetDir string,
 	rootAbs string,
 ) (string, error) {
@@ -192,11 +306,7 @@ func normalizeAndResolvePath(
 		return "", NewBundleError("extract", headerName, ErrSecurityViolation)
 	}
 
-	filePath := headerName
-	if stripPrefix != "" && strings.HasPrefix(filePath, stripPrefix) {
-		filePath = strings.TrimPrefix(filePath, stripPrefix)
-		filePath = strings.TrimPrefix(filePath, "/")
-	}
+	filePath := stripPrefix(headerName, prefixToStrip)
 
 	fullPath, err := safeJoin(rootAbs, targetDir, filePath)
 	if err != nil {

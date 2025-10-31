@@ -1,11 +1,11 @@
 //go:build integration
 
-// Package ocibundle provides integration tests for the OCI Bundle Distribution Module.
+// Package ocibundle_test provides integration tests for the OCI Bundle Distribution Module.
 // This file contains tests that verify the client works correctly against real registries.
 //
 // These tests require Docker to be available and may be skipped if Docker is not running.
 // Use the build tag "integration" to run these tests: go test -tags=integration
-package ocibundle
+package ocibundle_test
 
 import (
 	"context"
@@ -17,9 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	ocibundle "github.com/jmgilman/go/oci"
 	"github.com/jmgilman/go/oci/internal/testutil"
 )
 
@@ -66,11 +68,11 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 }
 
 // createTestClient creates an OCI client configured for the test registry
-func (suite *IntegrationTestSuite) createTestClient() (*Client, error) {
+func (suite *IntegrationTestSuite) createTestClient() (*ocibundle.Client, error) {
 	registryRef := suite.testRegistry.Reference()
 	registryHost := strings.Split(registryRef, "/")[0] // Extract hostname:port
 
-	return NewWithOptions(WithHTTP(true, true, []string{registryHost}))
+	return ocibundle.NewWithOptions(ocibundle.WithHTTP(true, true, []string{registryHost}))
 }
 
 // TearDownSuite is called once after all tests in the suite
@@ -179,12 +181,12 @@ func (suite *IntegrationTestSuite) TestLocalRegistryPushWithOptions() {
 
 	// Test push with options (annotations)
 	err = client.Push(ctx, sourceDir, reference,
-		WithAnnotations(map[string]string{
+		ocibundle.WithAnnotations(map[string]string{
 			"version":     "1.0.0",
 			"author":      "test-suite",
 			"description": "Integration test bundle",
 		}),
-		WithPlatform("linux/amd64"),
+		ocibundle.WithPlatform("linux/amd64"),
 	)
 	assert.NoError(err, "Push with options should succeed")
 
@@ -237,8 +239,8 @@ func (suite *IntegrationTestSuite) TestLocalRegistrySecurityValidation() {
 	require.NoError(err)
 
 	err = client.Pull(ctx, reference, targetDir,
-		WithMaxFiles(200),      // Allow up to 200 files
-		WithMaxSize(1024*1024), // 1MB limit
+		ocibundle.WithMaxFiles(200),      // Allow up to 200 files
+		ocibundle.WithMaxSize(1024*1024), // 1MB limit
 	)
 	assert.NoError(err, "Pull should succeed with security limits")
 
@@ -437,7 +439,7 @@ func (suite *IntegrationTestSuite) TestArchiveRoundTrip() {
 	archiveFile := filepath.Join(suite.tempDir, "test-archive.tar.gz")
 
 	// Test archive creation
-	archiver := NewTarGzArchiver()
+	archiver := ocibundle.NewTarGzArchiver()
 
 	// Create the archive file
 	archiveFileHandle, err := os.Create(archiveFile)
@@ -465,7 +467,7 @@ func (suite *IntegrationTestSuite) TestArchiveRoundTrip() {
 	require.NoError(err)
 	defer archiveReader.Close()
 
-	err = archiver.Extract(context.Background(), archiveReader, targetDir, ExtractOptions{})
+	err = archiver.Extract(context.Background(), archiveReader, targetDir, ocibundle.ExtractOptions{})
 	assert.NoError(err, "Archive extraction should succeed")
 
 	// Verify extracted files match original
@@ -535,7 +537,7 @@ func BenchmarkLocalRegistryOperations(b *testing.B) {
 	defer archiveGen.Close()
 
 	// Create test client
-	client, err := New()
+	client, err := ocibundle.New()
 	if err != nil {
 		b.Fatalf("Failed to create client: %v", err)
 	}
@@ -590,4 +592,108 @@ func BenchmarkLocalRegistryOperations(b *testing.B) {
 		// Clean up target directory
 		os.RemoveAll(targetDir)
 	}
+}
+
+// TestClient_SelectiveExtraction tests selective file extraction with glob patterns
+func TestClient_SelectiveExtraction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	ctx := context.Background()
+
+	// Start test registry
+	registry, err := testutil.NewTestRegistry(ctx)
+	require.NoError(t, err)
+	defer registry.Close(ctx)
+
+	err = registry.WaitForReady(ctx, 30*time.Second)
+	require.NoError(t, err)
+
+	// Create test data with various files
+	sourceDir := t.TempDir()
+	testFiles := map[string]string{
+		"config.json":         `{"app":"test"}`,
+		"readme.txt":          "README content",
+		"data/file1.json":     `{"data":1}`,
+		"data/file2.txt":      "Data 2",
+		"data/sub/file3.json": `{"data":3}`,
+		"src/main.go":         "package main",
+		"src/util/helper.go":  "package util",
+		"test/main_test.go":   "package main",
+	}
+
+	for path, content := range testFiles {
+		fullPath := filepath.Join(sourceDir, path)
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+		require.NoError(t, os.WriteFile(fullPath, []byte(content), 0o644))
+	}
+
+	// Create client
+	client, err := ocibundle.NewWithOptions(
+		ocibundle.WithHTTP(true, true, []string{registry.Reference()}),
+	)
+	require.NoError(t, err)
+
+	// Push the test data
+	reference := fmt.Sprintf("%s/selective-test:latest", registry.Reference())
+	err = client.Push(ctx, sourceDir, reference)
+	require.NoError(t, err)
+	t.Logf("Pushed test data to %s", reference)
+
+	// Test 1: Pull only JSON files
+	t.Run("extract only JSON files", func(t *testing.T) {
+		targetDir := t.TempDir()
+		err := client.Pull(ctx, reference, targetDir,
+			ocibundle.WithFilesToExtract("**/*.json"),
+		)
+		require.NoError(t, err)
+
+		// Verify only JSON files were extracted
+		assert.FileExists(t, filepath.Join(targetDir, "config.json"))
+		assert.FileExists(t, filepath.Join(targetDir, "data/file1.json"))
+		assert.FileExists(t, filepath.Join(targetDir, "data/sub/file3.json"))
+
+		// Verify non-JSON files were NOT extracted
+		assert.NoFileExists(t, filepath.Join(targetDir, "readme.txt"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "data/file2.txt"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "src/main.go"))
+	})
+
+	// Test 2: Pull only Go files
+	t.Run("extract only Go files", func(t *testing.T) {
+		targetDir := t.TempDir()
+		err := client.Pull(ctx, reference, targetDir,
+			ocibundle.WithFilesToExtract("**/*.go"),
+		)
+		require.NoError(t, err)
+
+		// Verify only Go files were extracted
+		assert.FileExists(t, filepath.Join(targetDir, "src/main.go"))
+		assert.FileExists(t, filepath.Join(targetDir, "src/util/helper.go"))
+		assert.FileExists(t, filepath.Join(targetDir, "test/main_test.go"))
+
+		// Verify non-Go files were NOT extracted
+		assert.NoFileExists(t, filepath.Join(targetDir, "config.json"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "readme.txt"))
+	})
+
+	// Test 3: Pull multiple patterns
+	t.Run("extract with multiple patterns", func(t *testing.T) {
+		targetDir := t.TempDir()
+		err := client.Pull(ctx, reference, targetDir,
+			ocibundle.WithFilesToExtract("config.json", "data/*.json"),
+		)
+		require.NoError(t, err)
+
+		// Verify matched files were extracted
+		assert.FileExists(t, filepath.Join(targetDir, "config.json"))
+		assert.FileExists(t, filepath.Join(targetDir, "data/file1.json"))
+
+		// Note: data/sub/file3.json should NOT match "data/*.json" (not recursive)
+		assert.NoFileExists(t, filepath.Join(targetDir, "data/sub/file3.json"))
+		assert.NoFileExists(t, filepath.Join(targetDir, "src/main.go"))
+	})
+
+	t.Log("✓ Selective extraction tests passed")
 }

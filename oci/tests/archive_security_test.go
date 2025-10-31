@@ -1,6 +1,6 @@
 //go:build integration
 
-package ocibundle
+package ocibundle_test
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	ocibundle "github.com/jmgilman/go/oci"
 	"github.com/jmgilman/go/oci/internal/testutil"
 )
 
@@ -21,7 +22,7 @@ func TestExtractionBlocksOWASPArchives(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = gen.Close() })
 
-	archiver := NewTarGzArchiver()
+	archiver := ocibundle.NewTarGzArchiver()
 
 	// 1) Path traversal
 	pt := filepath.Join(t.TempDir(), "pt.tar.gz")
@@ -29,7 +30,7 @@ func TestExtractionBlocksOWASPArchives(t *testing.T) {
 		t.Fatalf("generate path traversal: %v", err)
 	}
 	ptBytes, _ := os.ReadFile(pt)
-	if err := archiver.Extract(context.Background(), bytes.NewReader(ptBytes), t.TempDir(), DefaultExtractOptions); err == nil {
+	if err := archiver.Extract(context.Background(), bytes.NewReader(ptBytes), t.TempDir(), ocibundle.DefaultExtractOptions); err == nil {
 		t.Fatalf("expected path traversal archive to be rejected")
 	}
 
@@ -39,7 +40,7 @@ func TestExtractionBlocksOWASPArchives(t *testing.T) {
 		t.Fatalf("generate symlink bomb: %v", err)
 	}
 	sbBytes, _ := os.ReadFile(sb)
-	if err := archiver.Extract(context.Background(), bytes.NewReader(sbBytes), t.TempDir(), DefaultExtractOptions); err == nil {
+	if err := archiver.Extract(context.Background(), bytes.NewReader(sbBytes), t.TempDir(), ocibundle.DefaultExtractOptions); err == nil {
 		t.Fatalf("expected symlink bomb archive to be rejected")
 	}
 }

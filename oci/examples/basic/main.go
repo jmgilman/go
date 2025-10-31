@@ -40,6 +40,9 @@ func main() {
 	sourceDir := filepath.Join(cwd, "sample-files")
 	reference := "ghcr.io/your-org/sample-bundle:v1.0.0" // Replace with your registry
 
+	// Push the bundle
+	// Note: The bundle will be archived in eStargz format (seekable tar.gz)
+	// which is 100% compatible with standard tar.gz but enables selective extraction
 	fmt.Println("🚀 Pushing bundle to registry...")
 	if err := client.Push(ctx, sourceDir, reference); err != nil {
 		log.Fatalf("Failed to push bundle: %v", err)

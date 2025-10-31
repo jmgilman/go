@@ -68,6 +68,9 @@ type ExtractOptions struct {
 	// MaxFileSize is the maximum size allowed for any individual file.
 	MaxFileSize int64
 
+	// AllowHiddenFiles determines whether hidden files (starting with .) are allowed.
+	AllowHiddenFiles bool
+
 	// StripPrefix removes this prefix from all file paths during extraction.
 	// Useful for removing leading directory names from archived paths.
 	StripPrefix string
@@ -75,6 +78,15 @@ type ExtractOptions struct {
 	// PreservePerms determines whether to preserve original file permissions.
 	// When false, permissions are sanitized for security.
 	PreservePerms bool
+
+	// FilesToExtract specifies glob patterns for selective file extraction.
+	// When non-empty, only files matching at least one pattern will be extracted.
+	// Supports standard glob patterns:
+	//   - *.json: matches all .json files in root
+	//   - config/*: matches all files in config directory
+	//   - data/**/*.txt: matches all .txt files in data and subdirectories
+	// When empty, all files are extracted (default behavior).
+	FilesToExtract []string
 }
 
 // DefaultExtractOptions provides safe defaults for archive extraction.
@@ -83,18 +95,13 @@ type ExtractOptions struct {
 // - MaxSize: 1GB (prevents resource exhaustion)
 // - MaxFileSize: 100MB (prevents large individual files)
 // - PreservePerms: false (sanitizes permissions)
+// - FilesToExtract: empty (extracts all files).
 var DefaultExtractOptions = ExtractOptions{
-	MaxFiles:      10000,
-	MaxSize:       1 * 1024 * 1024 * 1024, // 1GB
-	MaxFileSize:   100 * 1024 * 1024,      // 100MB
-	StripPrefix:   "",
-	PreservePerms: false,
+	MaxFiles:         10000,
+	MaxSize:          1 * 1024 * 1024 * 1024, // 1GB
+	MaxFileSize:      100 * 1024 * 1024,      // 100MB
+	AllowHiddenFiles: false,
+	StripPrefix:      "",
+	PreservePerms:    false,
+	FilesToExtract:   nil, // Extract all files by default
 }
-
-// DefaultArchiver returns an archiver initialized with the default OS-backed filesystem.
-func DefaultArchiver() *TarGzArchiver {
-	_ = billy.NewLocal() // reserved for future internal use
-	return NewTarGzArchiver()
-}
-
-// TODO: Implement archive implementations

@@ -111,17 +111,9 @@ func WithORASClient(client oras.Client) ClientOption {
 	}
 }
 
-// WithStaticAuth configures static credentials for a specific registry.
-// This overrides the default Docker credential chain for the specified registry
-// but allows other registries to use the default chain.
-//
-// Parameters:
-//   - registry: The registry hostname (e.g., "ghcr.io")
-//   - username: Username for authentication
-//   - password: Password for authentication
-//
-// For other registries not matching the specified one, the default Docker
-// credential chain will be used.
+// WithStaticAuth configures static credentials for a specific registry,
+// overriding the default Docker credential chain for that registry only.
+// Other registries continue to use the default credential chain.
 func WithStaticAuth(registry, username, password string) ClientOption {
 	return func(opts *ClientOptions) {
 		if opts.Auth == nil {
@@ -133,16 +125,10 @@ func WithStaticAuth(registry, username, password string) ClientOption {
 	}
 }
 
-// WithCredentialFunc configures a custom credential callback function.
-// This completely overrides the default Docker credential chain and provides
-// full control over credential resolution for all registries.
-//
-// Parameters:
-//   - fn: Function that returns credentials for a given registry.
-//     Return empty credentials to fall back to anonymous access.
-//     Return an error to fail authentication for that registry.
-//
-// The function should be safe for concurrent use and handle context cancellation.
+// WithCredentialFunc configures a custom credential callback, completely overriding
+// the default Docker credential chain. The function should be safe for concurrent use
+// and handle context cancellation. Return empty credentials for anonymous access,
+// or return an error to fail authentication.
 func WithCredentialFunc(fn func(ctx context.Context, registry string) (auth.Credential, error)) ClientOption {
 	return func(opts *ClientOptions) {
 		if opts.Auth == nil {
@@ -152,19 +138,9 @@ func WithCredentialFunc(fn func(ctx context.Context, registry string) (auth.Cred
 	}
 }
 
-// WithHTTP configures HTTP transport settings for registry connections.
-// This allows explicit control over HTTP vs HTTPS usage and certificate validation.
-//
-// Parameters:
-//   - allowHTTP: Enable HTTP instead of HTTPS for registry connections
-//   - allowInsecure: Allow connections to registries with self-signed certificates
-//   - registries: Specific registries to apply this config to (empty applies to all)
-//
-// Example usage:
-//
-//	client, err := New(WithHTTP(true, true, []string{"localhost:5000"}))
-//
-// This is preferred over automatic localhost detection for better control and testability.
+// WithHTTP configures HTTP transport settings, providing explicit control over
+// protocol (HTTP vs HTTPS) and certificate validation. When registries is empty,
+// applies to all registries. Preferred over automatic localhost detection.
 func WithHTTP(allowHTTP, allowInsecure bool, registries []string) ClientOption {
 	return func(opts *ClientOptions) {
 		opts.HTTPConfig = &HTTPConfig{
@@ -175,23 +151,13 @@ func WithHTTP(allowHTTP, allowInsecure bool, registries []string) ClientOption {
 	}
 }
 
-// WithAllowHTTP is a convenience function for enabling HTTP connections.
-// This enables HTTP for all registries, useful for local development.
-//
-// Example usage:
-//
-//	client, err := New(WithAllowHTTP())
+// WithAllowHTTP enables HTTP connections for all registries. Useful for local development.
 func WithAllowHTTP() ClientOption {
 	return WithHTTP(true, false, nil)
 }
 
-// WithInsecureHTTP is a convenience function for enabling insecure HTTP connections.
-// This enables both HTTP and allows self-signed certificates for all registries.
-// WARNING: Only use this for testing environments.
-//
-// Example usage:
-//
-//	client, err := New(WithInsecureHTTP())
+// WithInsecureHTTP enables HTTP and accepts self-signed certificates for all registries.
+// WARNING: Only use in testing environments.
 func WithInsecureHTTP() ClientOption {
 	return WithHTTP(true, true, nil)
 }
@@ -302,6 +268,15 @@ type PullOptions struct {
 	// CacheBypass disables caching for this specific pull operation.
 	// When true, the operation will bypass any configured cache.
 	CacheBypass bool
+
+	// FilesToExtract specifies glob patterns for selective file extraction.
+	// When non-empty, only files matching at least one pattern will be extracted.
+	// Supports standard glob patterns:
+	//   - *.json: matches all .json files in root
+	//   - config/*: matches all files in config directory
+	//   - **/*.txt: matches all .txt files recursively
+	// When empty, all files are extracted (default behavior).
+	FilesToExtract []string
 }
 
 // PullOption is a functional option for configuring Pull operations.
@@ -370,6 +345,15 @@ func WithPullCacheBypass(bypass bool) PullOption {
 	}
 }
 
+// WithFilesToExtract specifies glob patterns for selective file extraction.
+// Only files matching at least one pattern will be extracted.
+// Supports: *.ext, dir/*, **/file.ext patterns.
+func WithFilesToExtract(patterns ...string) PullOption {
+	return func(opts *PullOptions) {
+		opts.FilesToExtract = patterns
+	}
+}
+
 // WithMaxFiles is an alias for WithPullMaxFiles for convenience.
 func WithMaxFiles(maxFiles int) PullOption {
 	return WithPullMaxFiles(maxFiles)
@@ -397,6 +381,7 @@ func DefaultPullOptions() *PullOptions {
 		MaxRetries:          3,
 		RetryDelay:          2 * time.Second,
 		CacheBypass:         false, // Use cache by default
+		FilesToExtract:      nil,   // Extract all files by default
 	}
 }
 
@@ -429,11 +414,8 @@ func WithFilesystem(fsys core.FS) ClientOption {
 	}
 }
 
-// WithCache configures caching for OCI operations.
-// The coordinator parameter provides the cache implementation.
-// The cachePath parameter specifies where to store cache data.
-// The maxSizeBytes parameter sets the maximum cache size (0 for default 1GB).
-// The defaultTTL parameter sets the default TTL for cache entries (0 for default 24h).
+// WithCache configures caching for OCI operations. Pass 0 for maxSizeBytes or defaultTTL
+// to use defaults (1GB and 24 hours respectively).
 func WithCache(coordinator cache.Cache, cachePath string, maxSizeBytes int64, defaultTTL time.Duration) ClientOption {
 	return func(opts *ClientOptions) {
 		if opts.CacheConfig == nil {
@@ -455,12 +437,7 @@ func WithCache(coordinator cache.Cache, cachePath string, maxSizeBytes int64, de
 	}
 }
 
-// WithCachePolicy sets the cache policy for OCI operations.
-// The policy parameter controls when caching should be applied:
-// - CachePolicyDisabled: No caching
-// - CachePolicyEnabled: Cache all operations
-// - CachePolicyPull: Cache only pull operations
-// - CachePolicyPush: Cache only push operations
+// WithCachePolicy sets when caching should be applied (disabled, enabled, pull-only, or push-only).
 func WithCachePolicy(policy CachePolicy) ClientOption {
 	return func(opts *ClientOptions) {
 		if opts.CacheConfig == nil {
