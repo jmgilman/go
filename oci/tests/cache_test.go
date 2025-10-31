@@ -1,12 +1,12 @@
 //go:build integration
 
-// Package ocibundle provides comprehensive integration tests for the OCI Bundle Cache system.
+// Package ocibundle_test provides comprehensive integration tests for the OCI Bundle Cache system.
 // This file contains tests that verify the cache coordinator works correctly with real registries,
 // network failures, cache corruption, and concurrent operations.
 //
 // These tests require Docker to be available and may be skipped if Docker is not running.
 // Use the build tag "integration" to run these tests: go test -tags=integration
-package ocibundle
+package ocibundle_test
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/jmgilman/go/fs/billy"
+	ocibundle "github.com/jmgilman/go/oci"
 	"github.com/jmgilman/go/oci/internal/cache"
 	"github.com/jmgilman/go/oci/internal/testutil"
 )
@@ -33,7 +34,7 @@ type CacheIntegrationTestSuite struct {
 	tempDir      string
 	cacheDir     string
 	coordinator  *cache.Coordinator
-	client       *Client
+	client       *ocibundle.Client
 	logger       *cache.Logger
 }
 
@@ -90,17 +91,17 @@ func (suite *CacheIntegrationTestSuite) SetupSuite() {
 	registryRef := suite.testRegistry.Reference()
 	registryHost := strings.Split(registryRef, "/")[0] // Extract hostname:port
 
-	client, err := NewWithOptions(WithHTTP(true, true, []string{registryHost}))
+	client, err := ocibundle.NewWithOptions(ocibundle.WithHTTP(true, true, []string{registryHost}))
 	require.NoError(suite.T(), err, "Failed to create OCI client")
 	suite.client = client
 }
 
 // createTestClient creates an OCI client configured for the test registry
-func (suite *CacheIntegrationTestSuite) createTestClient() (*Client, error) {
+func (suite *CacheIntegrationTestSuite) createTestClient() (*ocibundle.Client, error) {
 	registryRef := suite.testRegistry.Reference()
 	registryHost := strings.Split(registryRef, "/")[0] // Extract hostname:port
 
-	return NewWithOptions(WithHTTP(true, true, []string{registryHost}))
+	return ocibundle.NewWithOptions(ocibundle.WithHTTP(true, true, []string{registryHost}))
 }
 
 // TearDownSuite cleans up test resources
@@ -384,10 +385,10 @@ func (suite *CacheIntegrationTestSuite) TestCacheWithDifferentRegistryTypes() {
 
 	// Push with specific platform annotation
 	err = suite.client.Push(ctx, sourceDir, reference,
-		WithAnnotations(map[string]string{
+		ocibundle.WithAnnotations(map[string]string{
 			"org.opencontainers.image.version": "1.0.0",
 		}),
-		WithPlatform("linux/amd64"),
+		ocibundle.WithPlatform("linux/amd64"),
 	)
 	assert.NoError(err, "Push with annotations should succeed")
 

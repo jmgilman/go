@@ -4,6 +4,7 @@
 package ocibundle
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -17,6 +18,8 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/docker/distribution/registry/client/transport"
 	"github.com/jmgilman/go/fs/core"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 // testBlobRangeSupport checks if a registry blob URL supports HTTP Range requests.
@@ -131,6 +134,262 @@ func parseReference(reference string, allowHTTP bool) (registryURL, repository s
 
 	registryURL = fmt.Sprintf("%s://%s", protocol, registryHost)
 	return registryURL, repository
+}
+
+// getBlobURLFromRepository extracts the HTTP client and constructs the blob URL
+// from an ORAS repository and digest. This enables HTTP Range requests using the
+// repository's authenticated HTTP client.
+//
+// Parameters:
+//   - repo: ORAS repository with authentication configured
+//   - digest: Content digest (e.g., "sha256:abc123...")
+//
+// Returns:
+//   - blobURL: Full URL to the blob for HTTP Range requests
+//   - httpClient: Authenticated HTTP client from the repository
+//   - error: If client extraction or URL construction fails
+func getBlobURLFromRepository(repo *remote.Repository, digest string) (string, *http.Client, error) {
+	// Extract HTTP client from repository
+	// The repo.Client is an auth.Client interface, we need to access the underlying *http.Client
+	authClient, ok := repo.Client.(*auth.Client)
+	if !ok {
+		return "", nil, fmt.Errorf("cannot access auth client from repository")
+	}
+	if authClient.Client == nil {
+		return "", nil, fmt.Errorf("repository has no HTTP client configured")
+	}
+
+	// Construct blob URL from repository reference
+	registryHost := repo.Reference.Registry
+	repoPath := repo.Reference.Repository
+
+	// Determine protocol based on PlainHTTP setting
+	protocol := "https"
+	if repo.PlainHTTP {
+		protocol = "http"
+	}
+
+	registryURL := fmt.Sprintf("%s://%s", protocol, registryHost)
+	blobURL := buildBlobURL(registryURL, repoPath, digest)
+
+	return blobURL, authClient.Client, nil
+}
+
+// extractTOCFromBlob downloads only the Table of Contents (TOC) from an eStargz blob
+// using HTTP Range requests. This provides 99%+ bandwidth savings compared to downloading
+// the full blob, as only the footer (~50 bytes) and TOC (~50KB typical) are downloaded.
+//
+// The eStargz format stores the TOC at the end of the archive along with a footer that
+// contains the TOC offset. This function:
+//  1. Downloads the footer using a Range request for the last 100 bytes
+//  2. Parses the footer to get the TOC offset
+//  3. Downloads the TOC using a Range request
+//  4. Parses and returns the TOC entries
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - httpClient: Authenticated HTTP client (from repository)
+//   - blobURL: Full URL to the blob
+//   - blobSize: Total size of the blob (from OCI descriptor)
+//
+// Returns:
+//   - TOC entries containing file metadata
+//   - Error if Range requests not supported or extraction fails
+//
+// Bandwidth comparison:
+//   - Traditional: Download 5GB blob → 5GB
+//   - This function: Download footer + TOC → ~100KB (99.998% savings)
+func extractTOCFromBlob(
+	ctx context.Context,
+	httpClient *http.Client,
+	blobURL string,
+	blobSize int64,
+) ([]*estargz.TOCEntry, error) {
+	// Step 1: Test if registry supports HTTP Range requests
+	if !testBlobRangeSupport(ctx, httpClient, blobURL) {
+		return nil, fmt.Errorf("registry does not support HTTP Range requests for blob %s", blobURL)
+	}
+
+	// Step 2: Download footer (last 100 bytes should be sufficient)
+	// The footer is small and contains the TOC offset
+	footerSize := int64(100)
+	if footerSize > blobSize {
+		footerSize = blobSize // Handle very small blobs
+	}
+
+	footerSeeker := newHTTPRangeSeeker(httpClient, blobURL)
+	defer footerSeeker.Close()
+
+	// Seek to the position where footer starts (last 100 bytes)
+	footerStart := blobSize - footerSize
+	_, err := footerSeeker.Seek(footerStart, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek to footer: %w", err)
+	}
+
+	// Read the footer bytes
+	footerBytes := make([]byte, footerSize)
+	n, err := io.ReadFull(footerSeeker, footerBytes)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return nil, fmt.Errorf("failed to read footer: %w", err)
+	}
+	footerBytes = footerBytes[:n] // Trim to actual bytes read
+
+	// Step 3: Parse footer to get TOC offset using estargz library
+	footerReader := bytes.NewReader(footerBytes)
+	footerSection := io.NewSectionReader(footerReader, 0, int64(len(footerBytes)))
+
+	tocOffset, actualFooterSize, err := estargz.OpenFooter(footerSection)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse eStargz footer: %w", err)
+	}
+
+	// Step 4: Calculate TOC size and download it
+	// TOC is between tocOffset and start of footer
+	tocStart := tocOffset
+	tocEnd := blobSize - actualFooterSize
+	tocSize := tocEnd - tocStart
+
+	if tocSize <= 0 {
+		return nil, fmt.Errorf("invalid TOC size calculated: %d (offset=%d, blobSize=%d, footerSize=%d)",
+			tocSize, tocOffset, blobSize, actualFooterSize)
+	}
+
+	// Download TOC using Range request
+	tocSeeker := newHTTPRangeSeeker(httpClient, blobURL)
+	defer tocSeeker.Close()
+
+	_, err = tocSeeker.Seek(tocStart, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek to TOC: %w", err)
+	}
+
+	tocBytes := make([]byte, tocSize)
+	_, err = io.ReadFull(tocSeeker, tocBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read TOC: %w", err)
+	}
+
+	// Step 5: Parse the TOC to get file entries
+	// Create a virtual reader with TOC and footer to parse metadata
+	entries, err := parseTOCFromRangeBytes(tocBytes, footerBytes, tocOffset, blobSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse TOC entries: %w", err)
+	}
+
+	return entries, nil
+}
+
+// tocOnlyReaderAt is a ReaderAt that serves TOC and footer from downloaded bytes
+// and returns errors for any other read attempts. This allows estargz.Open() to
+// parse metadata without requiring the full archive.
+type tocOnlyReaderAt struct {
+	tocData    []byte
+	tocOffset  int64
+	footerData []byte
+	blobSize   int64
+}
+
+func (r *tocOnlyReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
+	// Check if reading from TOC region
+	tocEnd := r.tocOffset + int64(len(r.tocData))
+	if off >= r.tocOffset && off < tocEnd {
+		// Read from TOC data
+		tocReadOffset := off - r.tocOffset
+		available := int64(len(r.tocData)) - tocReadOffset
+		if available <= 0 {
+			return 0, io.EOF
+		}
+
+		toCopy := int64(len(p))
+		if toCopy > available {
+			toCopy = available
+		}
+
+		copy(p, r.tocData[tocReadOffset:tocReadOffset+toCopy])
+		if toCopy < int64(len(p)) {
+			return int(toCopy), io.EOF
+		}
+		return int(toCopy), nil
+	}
+
+	// Check if reading from footer region
+	footerStart := r.blobSize - int64(len(r.footerData))
+	if off >= footerStart && off < r.blobSize {
+		// Read from footer data
+		footerReadOffset := off - footerStart
+		available := int64(len(r.footerData)) - footerReadOffset
+		if available <= 0 {
+			return 0, io.EOF
+		}
+
+		toCopy := int64(len(p))
+		if toCopy > available {
+			toCopy = available
+		}
+
+		copy(p, r.footerData[footerReadOffset:footerReadOffset+toCopy])
+		if toCopy < int64(len(p)) {
+			return int(toCopy), io.EOF
+		}
+		return int(toCopy), nil
+	}
+
+	// Reading from a region we don't have (actual file content)
+	// For listing purposes, we don't need file content, only TOC
+	// Return zeros to satisfy estargz, which should only read TOC/footer for listing
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// parseTOCFromRangeBytes parses TOC entries from downloaded TOC and footer bytes.
+// It creates a virtual ReaderAt that estargz.Open() can use to parse the metadata.
+// This is different from the parseTOCFromBytes in list.go which expects the full blob.
+func parseTOCFromRangeBytes(tocData []byte, footerData []byte, tocOffset int64, blobSize int64) ([]*estargz.TOCEntry, error) {
+	// Create a virtual ReaderAt that serves TOC and footer
+	virtualReader := &tocOnlyReaderAt{
+		tocData:    tocData,
+		tocOffset:  tocOffset,
+		footerData: footerData,
+		blobSize:   blobSize,
+	}
+
+	// Create a SectionReader for the virtual archive
+	sectionReader := io.NewSectionReader(virtualReader, 0, blobSize)
+
+	// Open with estargz - this will read footer and TOC
+	stargzReader, err := estargz.Open(sectionReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open estargz reader: %w", err)
+	}
+
+	// Get the root entry and collect all entries
+	rootEntry, ok := stargzReader.Lookup("")
+	if !ok {
+		return nil, fmt.Errorf("failed to lookup root entry in TOC")
+	}
+
+	// Collect all TOC entries using the helper function
+	var entries []*estargz.TOCEntry
+	collectTOCEntries(rootEntry, &entries)
+
+	return entries, nil
+}
+
+// collectTOCEntries recursively collects all TOC entries from the tree structure.
+func collectTOCEntries(entry *estargz.TOCEntry, entries *[]*estargz.TOCEntry) {
+	// Add this entry if it's not the root
+	if entry.Name != "" {
+		*entries = append(*entries, entry)
+	}
+
+	// Recursively collect children
+	entry.ForeachChild(func(_ string, child *estargz.TOCEntry) bool {
+		collectTOCEntries(child, entries)
+		return true
+	})
 }
 
 // readerAtFromSeeker adapts an io.ReadSeeker to io.ReaderAt interface.

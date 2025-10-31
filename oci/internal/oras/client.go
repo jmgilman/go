@@ -329,6 +329,7 @@ type PullDescriptor struct {
 	MediaType string
 	Data      io.ReadCloser
 	Size      int64
+	Digest    string // OCI digest of the blob (e.g., "sha256:abc123...")
 }
 
 // Pull pulls an artifact from an OCI registry using ORAS.
@@ -361,7 +362,12 @@ func Pull(ctx context.Context, reference string, opts *AuthOptions) (*PullDescri
 
 	// If not a manifest, the fetched target is the content itself
 	if desc.MediaType != ocispec.MediaTypeImageManifest {
-		return &PullDescriptor{MediaType: desc.MediaType, Data: reader, Size: desc.Size}, nil
+		return &PullDescriptor{
+			MediaType: desc.MediaType,
+			Data:      reader,
+			Size:      desc.Size,
+			Digest:    desc.Digest.String(),
+		}, nil
 	}
 
 	// Handle image manifest by fetching first layer/blob
@@ -386,7 +392,12 @@ func Pull(ctx context.Context, reference string, opts *AuthOptions) (*PullDescri
 	if err != nil {
 		return nil, mapORASError("pull", reference, fmt.Errorf("fetch layer: %w", err))
 	}
-	return &PullDescriptor{MediaType: layerDesc.MediaType, Data: layerReader, Size: layerDesc.Size}, nil
+	return &PullDescriptor{
+		MediaType: layerDesc.MediaType,
+		Data:      layerReader,
+		Size:      layerDesc.Size,
+		Digest:    layerDesc.Digest.String(),
+	}, nil
 }
 
 // splitReference splits a full OCI reference into repository path and reference part (tag or digest).

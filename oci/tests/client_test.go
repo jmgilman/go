@@ -1,11 +1,11 @@
 //go:build integration
 
-// Package ocibundle provides integration tests for the OCI Bundle Distribution Module.
+// Package ocibundle_test provides integration tests for the OCI Bundle Distribution Module.
 // This file contains tests that verify the client works correctly against real registries.
 //
 // These tests require Docker to be available and may be skipped if Docker is not running.
 // Use the build tag "integration" to run these tests: go test -tags=integration
-package ocibundle
+package ocibundle_test
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	ocibundle "github.com/jmgilman/go/oci"
 	"github.com/jmgilman/go/oci/internal/testutil"
 )
 
@@ -67,11 +68,11 @@ func (suite *IntegrationTestSuite) SetupSuite() {
 }
 
 // createTestClient creates an OCI client configured for the test registry
-func (suite *IntegrationTestSuite) createTestClient() (*Client, error) {
+func (suite *IntegrationTestSuite) createTestClient() (*ocibundle.Client, error) {
 	registryRef := suite.testRegistry.Reference()
 	registryHost := strings.Split(registryRef, "/")[0] // Extract hostname:port
 
-	return NewWithOptions(WithHTTP(true, true, []string{registryHost}))
+	return ocibundle.NewWithOptions(ocibundle.WithHTTP(true, true, []string{registryHost}))
 }
 
 // TearDownSuite is called once after all tests in the suite
@@ -180,12 +181,12 @@ func (suite *IntegrationTestSuite) TestLocalRegistryPushWithOptions() {
 
 	// Test push with options (annotations)
 	err = client.Push(ctx, sourceDir, reference,
-		WithAnnotations(map[string]string{
+		ocibundle.WithAnnotations(map[string]string{
 			"version":     "1.0.0",
 			"author":      "test-suite",
 			"description": "Integration test bundle",
 		}),
-		WithPlatform("linux/amd64"),
+		ocibundle.WithPlatform("linux/amd64"),
 	)
 	assert.NoError(err, "Push with options should succeed")
 
@@ -238,8 +239,8 @@ func (suite *IntegrationTestSuite) TestLocalRegistrySecurityValidation() {
 	require.NoError(err)
 
 	err = client.Pull(ctx, reference, targetDir,
-		WithMaxFiles(200),      // Allow up to 200 files
-		WithMaxSize(1024*1024), // 1MB limit
+		ocibundle.WithMaxFiles(200),      // Allow up to 200 files
+		ocibundle.WithMaxSize(1024*1024), // 1MB limit
 	)
 	assert.NoError(err, "Pull should succeed with security limits")
 
@@ -438,7 +439,7 @@ func (suite *IntegrationTestSuite) TestArchiveRoundTrip() {
 	archiveFile := filepath.Join(suite.tempDir, "test-archive.tar.gz")
 
 	// Test archive creation
-	archiver := NewTarGzArchiver()
+	archiver := ocibundle.NewTarGzArchiver()
 
 	// Create the archive file
 	archiveFileHandle, err := os.Create(archiveFile)
@@ -466,7 +467,7 @@ func (suite *IntegrationTestSuite) TestArchiveRoundTrip() {
 	require.NoError(err)
 	defer archiveReader.Close()
 
-	err = archiver.Extract(context.Background(), archiveReader, targetDir, ExtractOptions{})
+	err = archiver.Extract(context.Background(), archiveReader, targetDir, ocibundle.ExtractOptions{})
 	assert.NoError(err, "Archive extraction should succeed")
 
 	// Verify extracted files match original
@@ -536,7 +537,7 @@ func BenchmarkLocalRegistryOperations(b *testing.B) {
 	defer archiveGen.Close()
 
 	// Create test client
-	client, err := New()
+	client, err := ocibundle.New()
 	if err != nil {
 		b.Fatalf("Failed to create client: %v", err)
 	}
@@ -629,8 +630,8 @@ func TestClient_SelectiveExtraction(t *testing.T) {
 	}
 
 	// Create client
-	client, err := NewWithOptions(
-		WithHTTP(true, true, []string{registry.Reference()}),
+	client, err := ocibundle.NewWithOptions(
+		ocibundle.WithHTTP(true, true, []string{registry.Reference()}),
 	)
 	require.NoError(t, err)
 
@@ -644,7 +645,7 @@ func TestClient_SelectiveExtraction(t *testing.T) {
 	t.Run("extract only JSON files", func(t *testing.T) {
 		targetDir := t.TempDir()
 		err := client.Pull(ctx, reference, targetDir,
-			WithFilesToExtract("**/*.json"),
+			ocibundle.WithFilesToExtract("**/*.json"),
 		)
 		require.NoError(t, err)
 
@@ -663,7 +664,7 @@ func TestClient_SelectiveExtraction(t *testing.T) {
 	t.Run("extract only Go files", func(t *testing.T) {
 		targetDir := t.TempDir()
 		err := client.Pull(ctx, reference, targetDir,
-			WithFilesToExtract("**/*.go"),
+			ocibundle.WithFilesToExtract("**/*.go"),
 		)
 		require.NoError(t, err)
 
@@ -681,7 +682,7 @@ func TestClient_SelectiveExtraction(t *testing.T) {
 	t.Run("extract with multiple patterns", func(t *testing.T) {
 		targetDir := t.TempDir()
 		err := client.Pull(ctx, reference, targetDir,
-			WithFilesToExtract("config.json", "data/*.json"),
+			ocibundle.WithFilesToExtract("config.json", "data/*.json"),
 		)
 		require.NoError(t, err)
 

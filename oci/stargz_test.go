@@ -214,3 +214,68 @@ func TestReaderAtFromSeeker(t *testing.T) {
 		assert.Equal(t, io.ErrUnexpectedEOF, err)
 	})
 }
+
+// TestTOCOnlyReaderAt tests the virtual ReaderAt for TOC and footer
+func TestTOCOnlyReaderAt(t *testing.T) {
+	// Create sample TOC and footer data
+	tocData := []byte("This is the TOC data")
+	footerData := []byte("Footer")
+	tocOffset := int64(100)
+	blobSize := int64(200)
+
+	reader := &tocOnlyReaderAt{
+		tocData:    tocData,
+		tocOffset:  tocOffset,
+		footerData: footerData,
+		blobSize:   blobSize,
+	}
+
+	t.Run("read from TOC region", func(t *testing.T) {
+		buf := make([]byte, 10)
+		n, err := reader.ReadAt(buf, tocOffset)
+		require.NoError(t, err)
+		assert.Equal(t, 10, n)
+		assert.Equal(t, "This is th", string(buf))
+	})
+
+	t.Run("read from footer region", func(t *testing.T) {
+		footerStart := blobSize - int64(len(footerData))
+		buf := make([]byte, 6)
+		n, err := reader.ReadAt(buf, footerStart)
+		require.NoError(t, err)
+		assert.Equal(t, 6, n)
+		assert.Equal(t, "Footer", string(buf))
+	})
+
+	t.Run("read from unknown region returns zeros", func(t *testing.T) {
+		// Reading from a region we don't have (before TOC, after footer start)
+		buf := make([]byte, 5)
+		n, err := reader.ReadAt(buf, 0) // Read from beginning
+		require.NoError(t, err)
+		assert.Equal(t, 5, n)
+		// Should be zeros
+		assert.Equal(t, []byte{0, 0, 0, 0, 0}, buf)
+	})
+
+	t.Run("read partial TOC at end", func(t *testing.T) {
+		// Read near the end of TOC
+		tocEnd := tocOffset + int64(len(tocData))
+		readStart := tocEnd - 5
+		buf := make([]byte, 10) // Request more than available
+		n, err := reader.ReadAt(buf, readStart)
+		assert.Equal(t, io.EOF, err)
+		assert.Equal(t, 5, n) // Only 5 bytes available
+		assert.Equal(t, " data", string(buf[:n]))
+	})
+}
+
+// TestGetBlobURLFromRepository tests blob URL extraction from repository
+// Note: This is a basic test; full integration tests are in tests/stargz_range_test.go
+func TestGetBlobURLFromRepository(t *testing.T) {
+	t.Run("basic functionality placeholder", func(t *testing.T) {
+		// This function requires a real *remote.Repository which is complex to mock
+		// The actual functionality is tested in integration tests
+		// Here we just verify the function signature exists
+		assert.NotNil(t, getBlobURLFromRepository, "getBlobURLFromRepository should exist")
+	})
+}

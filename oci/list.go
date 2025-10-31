@@ -153,9 +153,27 @@ func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesRes
 		layerDesc = manifestDesc
 	}
 
-	// For now, download the full blob to parse the TOC
-	// TODO: Optimize with HTTP Range requests to download only footer + TOC
-	// This still saves disk I/O since we're not extracting files
+	// Try HTTP Range approach first for bandwidth optimization
+	// This downloads only ~100KB (footer + TOC) instead of the full blob
+	var tocEntries []*estargz.TOCEntry
+	blobURL, httpClient, urlErr := getBlobURLFromRepository(repo, layerDesc.Digest.String())
+	if urlErr == nil {
+		// Try extracting TOC via HTTP Range requests
+		tocEntries, err = extractTOCFromBlob(ctx, httpClient, blobURL, layerDesc.Size)
+		if err == nil {
+			// Success! We got the TOC with minimal bandwidth
+			// Convert TOC entries to file metadata and return
+			result := convertTOCToListResult(tocEntries)
+			return result, nil
+		}
+		// HTTP Range extraction failed - will fall through to full download
+	}
+
+	// Fallback: Download the full blob to parse the TOC
+	// This happens when:
+	// - Registry doesn't support HTTP Range requests
+	// - HTTP Range extraction failed for any reason
+	// - Unable to get blob URL or HTTP client
 	var layerReader io.ReadCloser
 	layerReader, err = repo.Blobs().Fetch(ctx, layerDesc)
 	if err != nil {
@@ -169,8 +187,8 @@ func (c *Client) ListFiles(ctx context.Context, reference string) (*ListFilesRes
 		return nil, fmt.Errorf("failed to read blob: %w", err)
 	}
 
-	// Parse the TOC from the blob
-	tocEntries, err := parseTOCFromBytes(blobData)
+	// Parse the TOC from the blob using the existing function
+	tocEntries, err = parseTOCFromBytes(blobData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse TOC: %w", err)
 	}

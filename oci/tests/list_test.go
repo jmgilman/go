@@ -1,6 +1,6 @@
 //go:build integration
 
-package ocibundle
+package ocibundle_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	ocibundle "github.com/jmgilman/go/oci"
 	"github.com/jmgilman/go/oci/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,8 +48,8 @@ func TestClient_ListFiles(t *testing.T) {
 	}
 
 	// Create client
-	client, err := NewWithOptions(
-		WithHTTP(true, true, []string{registry.Reference()}),
+	client, err := ocibundle.NewWithOptions(
+		ocibundle.WithHTTP(true, true, []string{registry.Reference()}),
 	)
 	require.NoError(t, err)
 
@@ -143,8 +144,8 @@ func TestClient_ListFiles_InvalidReference(t *testing.T) {
 	require.NoError(t, err)
 	defer registry.Close(ctx)
 
-	client, err := NewWithOptions(
-		WithHTTP(true, true, []string{registry.Reference()}),
+	client, err := ocibundle.NewWithOptions(
+		ocibundle.WithHTTP(true, true, []string{registry.Reference()}),
 	)
 	require.NoError(t, err)
 
@@ -186,8 +187,8 @@ func TestClient_ListFiles_Performance(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, content, 0o644))
 	}
 
-	client, err := NewWithOptions(
-		WithHTTP(true, true, []string{registry.Reference()}),
+	client, err := ocibundle.NewWithOptions(
+		ocibundle.WithHTTP(true, true, []string{registry.Reference()}),
 	)
 	require.NoError(t, err)
 

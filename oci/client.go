@@ -408,8 +408,8 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 		}
 	}
 
-	// Create authenticated repository (needed for future authentication validation)
-	_, repoErr := c.createRepository(ctx, reference)
+	// Create authenticated repository (needed for HTTP Range requests and authentication)
+	repo, repoErr := c.createRepository(ctx, reference)
 	if repoErr != nil {
 		return repoErr
 	}
@@ -443,19 +443,36 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 
 	// Decision tree for extraction strategy
 	if len(pullOpts.FilesToExtract) > 0 {
-		// Selective extraction requested
-		// For now, we'll download the full blob and extract selectively
-		// This saves disk I/O and decompression CPU, but not bandwidth
-		// TODO: In future, optimize to use HTTP Range requests when available
+		// Selective extraction requested - try HTTP Range for bandwidth optimization
+		var readerAt io.ReaderAt
+		var blobSize int64
 
-		// Read the full blob into memory
-		blobData, err := io.ReadAll(descriptor.Data)
-		if err != nil {
-			return fmt.Errorf("failed to read blob data: %w", err)
+		// Try HTTP Range approach for bandwidth savings
+		blobURL, httpClient, urlErr := getBlobURLFromRepository(repo, descriptor.Digest)
+		if urlErr == nil && testBlobRangeSupport(ctx, httpClient, blobURL) {
+			// Registry supports Range requests - use HTTP Range seeker
+			// This downloads only the chunks needed for selected files
+			descriptor.Data.Close() // Close the full download stream
+
+			rangeSeeker := newHTTPRangeSeeker(httpClient, blobURL)
+			defer rangeSeeker.Close()
+
+			readerAt = newReaderAtFromSeeker(rangeSeeker, descriptor.Size)
+			blobSize = descriptor.Size
+		} else {
+			// Fallback: Read the full blob into memory
+			// This happens when:
+			// - Registry doesn't support HTTP Range requests
+			// - Unable to get blob URL or HTTP client
+			blobData, err := io.ReadAll(descriptor.Data)
+			if err != nil {
+				return fmt.Errorf("failed to read blob data: %w", err)
+			}
+
+			// Create a ReaderAt from the blob data
+			readerAt = bytes.NewReader(blobData)
+			blobSize = int64(len(blobData))
 		}
-
-		// Create a ReaderAt from the blob data
-		readerAt := bytes.NewReader(blobData)
 
 		// Try selective extraction with estargz
 		tempDir, tmpErr := c.createTempDir("ocibundle-selective-")
@@ -468,7 +485,7 @@ func (c *Client) Pull(ctx context.Context, reference, targetDir string, opts ...
 		if err := extractSelectiveFromStargz(
 			ctx,
 			readerAt,
-			int64(len(blobData)),
+			blobSize,
 			tempDir,
 			pullOpts.FilesToExtract,
 			extractOpts,
