@@ -252,7 +252,8 @@ func (l *Loader) LoadModule(ctx context.Context, modulePath string) (cue.Value, 
 		// Also add the module file to the overlay
 		// This is important for CUE to be able to reference it
 		if data, err := l.fs.ReadFile(moduleFilePath); err == nil {
-			absModulePath := "/" + moduleFilePath
+			// Normalize path separators to forward slashes for overlay keys
+			absModulePath := "/" + filepath.ToSlash(moduleFilePath)
 			overlay[absModulePath] = load.FromBytes(data)
 		}
 	}
@@ -358,8 +359,11 @@ func (l *Loader) buildOverlayForFiles(filePaths []string) (map[string]load.Sourc
 			return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 		}
 
+		// Normalize path separators to forward slashes for overlay keys
+		// CUE overlay expects Unix-style paths regardless of OS
+		absPath := filepath.ToSlash(path)
+
 		// Ensure path starts with /
-		absPath := path
 		if absPath[0] != '/' {
 			absPath = "/" + absPath
 		}
