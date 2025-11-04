@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"cuelang.org/go/cue"
@@ -35,6 +36,31 @@ func (l *Loader) Context() *cue.Context {
 	return l.cueCtx
 }
 
+// makeAbsolutePath creates a cross-platform absolute path for CUE overlay usage.
+// On Windows, CUE's load.Config.Dir must be a Windows-style absolute path (e.g., C:/path).
+// On Unix, it can be a Unix-style path (e.g., /path).
+// Since we're using in-memory overlays, we use fake but valid absolute paths.
+func makeAbsolutePath(path string) string {
+	// Normalize to forward slashes first
+	normalized := filepath.ToSlash(path)
+
+	// On Windows, prepend a drive letter to make it a valid absolute path
+	if runtime.GOOS == "windows" {
+		// If it starts with /, convert to C:/... style
+		if len(normalized) > 0 && normalized[0] == '/' {
+			return "C:" + normalized
+		}
+		// Otherwise prepend C:/
+		return "C:/" + normalized
+	}
+
+	// On Unix, ensure it starts with /
+	if len(normalized) > 0 && normalized[0] != '/' {
+		return "/" + normalized
+	}
+	return normalized
+}
+
 // LoadFile loads a single CUE file from the filesystem.
 // The filePath is relative to the filesystem root.
 //
@@ -58,7 +84,7 @@ func (l *Loader) LoadFile(ctx context.Context, filePath string) (cue.Value, erro
 
 	// Load using load.Instances
 	config := &load.Config{
-		Dir:     "/",
+		Dir:     makeAbsolutePath("/"),
 		Overlay: overlay,
 	}
 
@@ -154,7 +180,7 @@ func (l *Loader) LoadPackage(ctx context.Context, packagePath string) (cue.Value
 
 	// Load using load.Instances
 	config := &load.Config{
-		Dir:     "/" + packagePath,
+		Dir:     makeAbsolutePath(packagePath),
 		Overlay: overlay,
 	}
 
@@ -252,22 +278,22 @@ func (l *Loader) LoadModule(ctx context.Context, modulePath string) (cue.Value, 
 		// Also add the module file to the overlay
 		// This is important for CUE to be able to reference it
 		if data, err := l.fs.ReadFile(moduleFilePath); err == nil {
-			// Normalize path separators to forward slashes for overlay keys
-			absModulePath := "/" + filepath.ToSlash(moduleFilePath)
+			// Create cross-platform absolute path for overlay key
+			absModulePath := makeAbsolutePath(moduleFilePath)
 			overlay[absModulePath] = load.FromBytes(data)
 		}
 	}
 
 	// Load using load.Instances
 	// Normalize the directory path
-	dir := "/" + modulePath
+	dir := modulePath
 	if modulePath == "." {
 		dir = "/"
 	}
 
 	config := &load.Config{
-		Dir:        dir,
-		ModuleRoot: dir,
+		Dir:        makeAbsolutePath(dir),
+		ModuleRoot: makeAbsolutePath(dir),
 		Overlay:    overlay,
 		Module:     moduleImportPath, // Explicitly set for import resolution with overlays
 	}
@@ -359,14 +385,9 @@ func (l *Loader) buildOverlayForFiles(filePaths []string) (map[string]load.Sourc
 			return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 		}
 
-		// Normalize path separators to forward slashes for overlay keys
-		// CUE overlay expects Unix-style paths regardless of OS
-		absPath := filepath.ToSlash(path)
-
-		// Ensure path starts with /
-		if absPath[0] != '/' {
-			absPath = "/" + absPath
-		}
+		// Create cross-platform absolute path for overlay key
+		// This must match the path format used in Config.Dir
+		absPath := makeAbsolutePath(path)
 
 		overlay[absPath] = load.FromBytes(data)
 	}
