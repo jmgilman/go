@@ -9,6 +9,7 @@ use (
 	./fs/fstest
 	./fs/minio
 	./git
+	./github
 	./oci
 	./oci/signature
 )
