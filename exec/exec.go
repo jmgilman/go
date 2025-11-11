@@ -5,6 +5,8 @@ import (
 	"io"
 )
 
+//go:generate go run github.com/matryer/moq@latest -out mocks/executor.go -pkg mocks . Executor
+
 // Executor is the main interface for executing commands.
 // It provides a fluent API for configuring and running commands.
 type Executor interface {
