@@ -37,7 +37,7 @@ func New(opts ...Option) *Command {
 }
 
 // WithEnv sets environment variables for the command.
-func (c *Command) WithEnv(env map[string]string) *Command {
+func (c *Command) WithEnv(env map[string]string) Executor {
 	for k, v := range env {
 		c.config.localEnv[k] = v
 	}
@@ -45,51 +45,51 @@ func (c *Command) WithEnv(env map[string]string) *Command {
 }
 
 // WithDir sets the working directory for the command.
-func (c *Command) WithDir(dir string) *Command {
+func (c *Command) WithDir(dir string) Executor {
 	c.config.localDir = dir
 	return c
 }
 
 // WithContext sets the context for the command.
-func (c *Command) WithContext(ctx context.Context) *Command {
+func (c *Command) WithContext(ctx context.Context) Executor {
 	c.ctx = ctx
 	return c
 }
 
 // WithDisableColors disables color output.
-func (c *Command) WithDisableColors() *Command {
+func (c *Command) WithDisableColors() Executor {
 	val := true
 	c.config.localDisableColors = &val
 	return c
 }
 
 // WithTimeout sets a timeout for the command.
-func (c *Command) WithTimeout(timeout string) *Command {
+func (c *Command) WithTimeout(timeout string) Executor {
 	c.timeout = timeout
 	return c
 }
 
 // WithInheritEnv enables environment inheritance.
-func (c *Command) WithInheritEnv() *Command {
+func (c *Command) WithInheritEnv() Executor {
 	val := true
 	c.config.localInheritEnv = &val
 	return c
 }
 
 // WithStdout sets the stdout writer.
-func (c *Command) WithStdout(w io.Writer) *Command {
+func (c *Command) WithStdout(w io.Writer) Executor {
 	c.stdout = w
 	return c
 }
 
 // WithStderr sets the stderr writer.
-func (c *Command) WithStderr(w io.Writer) *Command {
+func (c *Command) WithStderr(w io.Writer) Executor {
 	c.stderr = w
 	return c
 }
 
 // WithPassthrough enables output passthrough.
-func (c *Command) WithPassthrough() *Command {
+func (c *Command) WithPassthrough() Executor {
 	val := true
 	c.config.localPassthrough = &val
 	return c
@@ -186,7 +186,7 @@ func (c *Command) Run(args ...string) (*Result, error) {
 }
 
 // Clone creates a copy of the executor with the same configuration.
-func (c *Command) Clone() *Command {
+func (c *Command) Clone() Executor {
 	return &Command{
 		config: c.config.clone(),
 		ctx:    c.ctx,
