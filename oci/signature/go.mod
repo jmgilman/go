@@ -4,9 +4,9 @@ go 1.25.3
 
 require (
 	github.com/gobwas/glob v0.2.3
+	github.com/google/go-containerregistry v0.20.6
 	github.com/jmgilman/go/fs/billy v0.1.1
 	github.com/jmgilman/go/oci v0.0.0
-	github.com/opencontainers/go-digest v1.0.0
 	github.com/sigstore/cosign/v2 v2.6.1
 	github.com/sigstore/rekor v1.4.2
 	github.com/sigstore/sigstore v1.9.6-0.20250729224751-181c5d3339b3
@@ -80,7 +80,6 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/certificate-transparency-go v1.3.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-containerregistry v0.20.6 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
@@ -104,6 +103,7 @@ require (
 	github.com/nozzle/throttler v0.0.0-20180817012639-2ea982251481 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/onsi/gomega v1.35.1 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
