@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "attributes",
+    srcs = [
+        "parse.go",
+        "processor.go",
+        "walker.go",
+    ],
+    importpath = "github.com/jmgilman/go/cue/attributes",
+    visibility = ["//visibility:public"],
+    deps = ["@org_cuelang_go//cue"],
+)
+
+go_test(
+    name = "attributes_test",
+    srcs = [
+        "parse_test.go",
+        "processor_test.go",
+        "walker_test.go",
+    ],
+    embed = [":attributes"],
+    deps = [
+        "@org_cuelang_go//cue",
+        "@org_cuelang_go//cue/cuecontext",
+    ],
+)

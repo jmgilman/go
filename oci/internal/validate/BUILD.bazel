@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "validate",
+    srcs = ["path.go"],
+    importpath = "github.com/jmgilman/go/oci/internal/validate",
+    visibility = ["//oci:__subpackages__"],
+)
+
+go_test(
+    name = "validate_test",
+    srcs = [
+        "path_fuzz_test.go",
+        "path_test.go",
+    ],
+    embed = [":validate"],
+)

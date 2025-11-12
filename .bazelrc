@@ -1,0 +1,15 @@
+# Common settings
+common --enable_bzlmod
+
+# Build settings
+build --incompatible_enable_cc_toolchain_resolution
+
+# Go-specific settings
+# Use host's Go module cache for faster downloads
+build --repo_env=GO_REPOSITORY_USE_HOST_CACHE=1
+
+# Go proxy configuration
+build --repo_env=GOPROXY=https://proxy.golang.org,direct
+
+# Test output
+test --test_output=errors

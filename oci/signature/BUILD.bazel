@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/oci/signature
+
+go_library(
+    name = "signature",
+    srcs = [
+        "cosign_adapter.go",
+        "doc.go",
+        "keyless.go",
+        "keys.go",
+        "options.go",
+        "policy.go",
+        "policy_hash.go",
+        "rekor.go",
+        "verifier.go",
+    ],
+    importpath = "github.com/jmgilman/go/oci/signature",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//oci",
+        "//oci/internal/oras",
+        "@com_github_gobwas_glob//:glob",
+        "@com_github_google_go_containerregistry//pkg/name",
+        "@com_github_sigstore_cosign_v2//pkg/cosign",
+        "@com_github_sigstore_cosign_v2//pkg/oci",
+        "@com_github_sigstore_rekor//pkg/generated/client",
+        "@com_github_sigstore_sigstore//pkg/signature",
+        "@land_oras_oras_go_v2//errdef",
+    ],
+)
+
+go_test(
+    name = "signature_test",
+    srcs = [
+        "benchmark_test.go",
+        "example_test.go",
+        "security_test.go",
+        "verifier_test.go",
+    ],
+    embed = [":signature"],
+    deps = [
+        "//fs/billy",
+        "//oci",
+        "//oci/internal/cache",
+        "//oci/internal/oras",
+    ],
+)

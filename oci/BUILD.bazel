@@ -1,0 +1,61 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/oci
+
+go_library(
+    name = "oci",
+    srcs = [
+        "archive.go",
+        "archive_targz.go",
+        "archive_targz_helpers.go",
+        "client.go",
+        "doc.go",
+        "errors.go",
+        "list.go",
+        "options.go",
+        "security.go",
+        "signature_interface.go",
+        "stargz.go",
+    ],
+    importpath = "github.com/jmgilman/go/oci",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//fs/billy",
+        "//fs/core",
+        "//oci/internal/cache",
+        "//oci/internal/oras",
+        "//oci/internal/validate",
+        "@com_github_containerd_stargz_snapshotter_estargz//:estargz",
+        "@com_github_docker_distribution//registry/client/transport",
+        "@com_github_opencontainers_image_spec//specs-go/v1:specs-go",
+        "@land_oras_oras_go_v2//:oras-go",
+        "@land_oras_oras_go_v2//registry/remote",
+        "@land_oras_oras_go_v2//registry/remote/auth",
+    ],
+)
+
+go_test(
+    name = "oci_test",
+    srcs = [
+        "archive_test.go",
+        "client_benchmark_test.go",
+        "client_signature_test.go",
+        "client_test.go",
+        "errors_test.go",
+        "list_test.go",
+        "options_test.go",
+        "security_fuzz_test.go",
+        "security_test.go",
+        "stargz_test.go",
+    ],
+    embed = [":oci"],
+    deps = [
+        "//fs/billy",
+        "//oci/internal/oras",
+        "//oci/internal/oras/mocks",
+        "//oci/internal/testutil",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@land_oras_oras_go_v2//registry/remote/auth",
+    ],
+)

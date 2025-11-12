@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "basic_with_progress_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/jmgilman/go/oci/examples/basic_with_progress",
+    visibility = ["//visibility:private"],
+    deps = ["//oci"],
+)
+
+go_binary(
+    name = "basic_with_progress",
+    embed = [":basic_with_progress_lib"],
+    visibility = ["//visibility:public"],
+)

@@ -1104,6 +1104,7 @@ github.com/jmgilman/go/fs/core v0.2.0 h1:zyI0Pv1aAS8A0PB+2o32xEmBHfl+W61hZ0I9Vd1
 github.com/jmgilman/go/fs/core v0.2.0/go.mod h1:ZSH+w+Q/qWw+zL2maTZb3xKz+iskC5RR1cwBeQjsdz8=
 github.com/jmgilman/go/fs/fstest v0.1.0 h1:gCUpIQdqaZJ4sntTeGefgI3QQp2LiAyOR9CIECQK9GA=
 github.com/jmgilman/go/fs/fstest v0.1.0/go.mod h1:IyFL1wBeIO/rA/MkWtA0iMpawJTj9NAw4h6xvqqaR1Y=
+github.com/jmgilman/go/oci v0.0.0-20251111054603-5667d6907f6d h1:fIiNLoCLggdRT6TAry97ypamYicUKf/JRHesE42t6ic=
 github.com/jmhodges/clock v1.2.0 h1:eq4kys+NI0PLngzaHEe7AmPT90XMGIEySD1JfV1PDIs=
 github.com/jmhodges/clock v1.2.0/go.mod h1:qKjhA7x7u/lQpPB1XAqX1b1lCI/w3/fNuYpI/ZjLynI=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=

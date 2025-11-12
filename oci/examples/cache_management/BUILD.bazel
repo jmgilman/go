@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "cache_management_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/jmgilman/go/oci/examples/cache_management",
+    visibility = ["//visibility:private"],
+    deps = ["//oci"],
+)
+
+go_binary(
+    name = "cache_management",
+    embed = [":cache_management_lib"],
+    visibility = ["//visibility:public"],
+)

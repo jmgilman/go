@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+# gazelle:prefix github.com/jmgilman/go/github
+
+go_library(
+    name = "github",
+    srcs = [
+        "client.go",
+        "doc.go",
+        "errors.go",
+        "github.go",
+        "issue.go",
+        "options.go",
+        "provider.go",
+        "pullrequest.go",
+        "repository.go",
+        "types.go",
+        "workflow.go",
+    ],
+    importpath = "github.com/jmgilman/go/github",
+    visibility = ["//visibility:public"],
+    deps = ["//errors"],
+)
