@@ -12,5 +12,4 @@ use (
 	./github
 	./oci
 	./oci/signature
-	./tools
 )
