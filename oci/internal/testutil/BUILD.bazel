@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "testutil",
+    srcs = [
+        "archive_generator.go",
+        "benchmark_utils.go",
+        "coverage.go",
+        "malicious_archives.go",
+        "mock_verifier.go",
+        "registry.go",
+    ],
+    importpath = "github.com/jmgilman/go/oci/internal/testutil",
+    visibility = ["//oci:__subpackages__"],
+    deps = [
+        "//oci/internal/oras",
+        "@com_github_testcontainers_testcontainers_go//:testcontainers-go",
+        "@com_github_testcontainers_testcontainers_go//wait",
+    ],
+)
+
+go_test(
+    name = "testutil_test",
+    srcs = [
+        "archive_generator_test.go",
+        "benchmark_utils_test.go",
+        "coverage_test.go",
+        "malicious_archives_test.go",
+        "mock_verifier_test.go",
+    ],
+    embed = [":testutil"],
+    deps = [
+        "//oci/internal/oras",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

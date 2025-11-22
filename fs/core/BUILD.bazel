@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/fs/core
+
+go_library(
+    name = "core",
+    srcs = [
+        "copy.go",
+        "doc.go",
+        "errors.go",
+        "interfaces.go",
+    ],
+    importpath = "github.com/jmgilman/go/fs/core",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "core_test",
+    srcs = [
+        "errors_test.go",
+        "fstype_test.go",
+        "interfaces_test.go",
+    ],
+    deps = [":core"],
+)

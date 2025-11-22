@@ -428,7 +428,7 @@ func TestCLIProvider_GetWorkflowRun(t *testing.T) {
 						"conclusion": "SUCCESS",
 						"headBranch": "main",
 						"headSha": "abc123",
-						"runNumber": 42,
+						"number": 42,
 						"event": "push",
 						"createdAt": "2023-01-01T00:00:00Z",
 						"updatedAt": "2023-01-01T00:05:00Z",

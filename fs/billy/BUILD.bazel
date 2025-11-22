@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/fs/billy
+
+go_library(
+    name = "billy",
+    srcs = [
+        "billy.go",
+        "doc.go",
+        "file.go",
+    ],
+    importpath = "github.com/jmgilman/go/fs/billy",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//fs/core",
+        "@com_github_go_git_go_billy_v5//:go-billy",
+        "@com_github_go_git_go_billy_v5//memfs",
+        "@com_github_go_git_go_billy_v5//osfs",
+    ],
+)
+
+go_test(
+    name = "billy_test",
+    srcs = [
+        "billy_test.go",
+        "file_test.go",
+    ],
+    embed = [":billy"],
+    deps = [
+        "//fs/core",
+        "//fs/fstest",
+        "@com_github_go_git_go_billy_v5//memfs",
+    ],
+)

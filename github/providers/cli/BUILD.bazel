@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "cli",
+    srcs = ["cli.go"],
+    importpath = "github.com/jmgilman/go/github/providers/cli",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//errors",
+        "//exec",
+        "//github",
+    ],
+)
+
+go_test(
+    name = "cli_test",
+    srcs = ["cli_test.go"],
+    embed = [":cli"],
+    deps = [
+        "//errors",
+        "//exec",
+        "//exec/mocks",
+        "//github",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

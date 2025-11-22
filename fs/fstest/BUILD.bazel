@@ -1,0 +1,32 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/fs/fstest
+
+go_library(
+    name = "fstest",
+    srcs = [
+        "chroot_fs.go",
+        "file_capabilities.go",
+        "manage_fs.go",
+        "metadata_fs.go",
+        "open_file_flags.go",
+        "read_fs.go",
+        "suite.go",
+        "symlink_fs.go",
+        "temp_fs.go",
+        "walk_fs.go",
+        "write_fs.go",
+    ],
+    importpath = "github.com/jmgilman/go/fs/fstest",
+    visibility = ["//visibility:public"],
+    deps = ["//fs/core"],
+)
+
+go_test(
+    name = "fstest_test",
+    srcs = ["integration_test.go"],
+    deps = [
+        ":fstest",
+        "//fs/core",
+    ],
+)

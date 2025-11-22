@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/fs/minio
+
+go_library(
+    name = "minio",
+    srcs = [
+        "config.go",
+        "file.go",
+        "minio.go",
+    ],
+    importpath = "github.com/jmgilman/go/fs/minio",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//fs/core",
+        "//fs/minio/internal/errs",
+        "//fs/minio/internal/pathutil",
+        "//fs/minio/internal/types",
+        "//fs/minio/internal/walk",
+        "@com_github_minio_minio_go_v7//:minio-go",
+        "@com_github_minio_minio_go_v7//pkg/credentials",
+        "@org_golang_x_sync//errgroup",
+    ],
+)
+
+go_test(
+    name = "minio_test",
+    srcs = [
+        "file_test.go",
+        "integration_test.go",
+        "minio_integration_test.go",
+        "minio_test.go",
+    ],
+    embed = [":minio"],
+    deps = [
+        "//fs/core",
+        "//fs/fstest",
+        "//fs/minio/internal/errs",
+        "//fs/minio/internal/pathutil",
+        "//fs/minio/internal/types",
+        "@com_github_minio_minio_go_v7//:minio-go",
+        "@com_github_minio_minio_go_v7//pkg/credentials",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@com_github_testcontainers_testcontainers_go//:testcontainers-go",
+        "@com_github_testcontainers_testcontainers_go//wait",
+    ],
+)

@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "signature_verification_advanced_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/jmgilman/go/oci/examples/signature_verification_advanced",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//fs/billy",
+        "//oci",
+        "//oci/internal/cache",
+        "//oci/signature",
+    ],
+)
+
+go_binary(
+    name = "signature_verification_advanced",
+    embed = [":signature_verification_advanced_lib"],
+    visibility = ["//visibility:public"],
+)

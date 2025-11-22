@@ -141,25 +141,3 @@ run:
   relative-path-mode: gomod
   allow-parallel-runners: true
   concurrency: 0 # auto
-
-# --- Severity mapping (optional)
-# https://golangci-lint.run/docs/configuration/file/#severity-configuration
-severity:
-  default: error
-  rules:
-    - linters:
-        [
-          errcheck,
-          errorlint,
-          wrapcheck,
-          staticcheck,
-          govet,
-          containedctx,
-          contextcheck,
-          noctx,
-          sloglint,
-          depguard,
-        ]
-      severity: error
-    - linters: [funlen, nestif, dupword, misspell, revive]
-      severity: warning

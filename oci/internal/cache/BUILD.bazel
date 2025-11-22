@@ -1,0 +1,61 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "cache",
+    srcs = [
+        "blob.go",
+        "cache_debug.go",
+        "doc.go",
+        "errors.go",
+        "eviction.go",
+        "index.go",
+        "interfaces.go",
+        "logging.go",
+        "manager.go",
+        "manifest.go",
+        "metrics.go",
+        "resolver.go",
+        "storage.go",
+        "tags.go",
+        "types.go",
+        "verification.go",
+    ],
+    importpath = "github.com/jmgilman/go/oci/internal/cache",
+    visibility = ["//oci:__subpackages__"],
+    deps = [
+        "//fs/core",
+        "@com_github_opencontainers_image_spec//specs-go/v1:specs-go",
+    ],
+)
+
+go_test(
+    name = "cache_test",
+    srcs = [
+        "blob_test.go",
+        "cache_debug_test.go",
+        "cache_monitoring_test.go",
+        "errors_test.go",
+        "eviction_test.go",
+        "index_test.go",
+        "interfaces_test.go",
+        "manager_test.go",
+        "manifest_test.go",
+        "metrics_test.go",
+        "resolver_test.go",
+        "storage_test.go",
+        "tags_test.go",
+        "types_test.go",
+        "verification_test.go",
+    ],
+    embed = [":cache"],
+    deps = [
+        "//fs/billy",
+        "//fs/core",
+        "@com_github_opencontainers_go_digest//:go-digest",
+        "@com_github_opencontainers_image_spec//specs-go",
+        "@com_github_opencontainers_image_spec//specs-go/v1:specs-go",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//mock",
+        "@com_github_stretchr_testify//require",
+    ],
+)

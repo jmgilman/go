@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "walk",
+    srcs = ["walk.go"],
+    importpath = "github.com/jmgilman/go/fs/minio/internal/walk",
+    visibility = ["//fs/minio:__subpackages__"],
+    deps = ["//fs/minio/internal/pathutil"],
+)

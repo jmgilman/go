@@ -1,0 +1,29 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/exec
+
+go_library(
+    name = "exec",
+    srcs = [
+        "command.go",
+        "doc.go",
+        "errors.go",
+        "exec.go",
+        "options.go",
+        "output.go",
+        "wrapper.go",
+    ],
+    importpath = "github.com/jmgilman/go/exec",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "exec_test",
+    srcs = [
+        "exec_test.go",
+        "wrapper_mock_test.go",
+        "wrapper_test.go",
+    ],
+    embed = [":exec"],
+    deps = ["//exec/mocks"],
+)

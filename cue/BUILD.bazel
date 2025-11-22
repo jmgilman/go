@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/cue
+
+go_library(
+    name = "cue",
+    srcs = [
+        "decoder.go",
+        "doc.go",
+        "encoder.go",
+        "errors.go",
+        "loader.go",
+        "validator.go",
+    ],
+    importpath = "github.com/jmgilman/go/cue",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//errors",
+        "//fs/core",
+        "@org_cuelang_go//cue",
+        "@org_cuelang_go//cue/cuecontext",
+        "@org_cuelang_go//cue/errors",
+        "@org_cuelang_go//cue/load",
+        "@org_cuelang_go//cue/token",
+        "@org_cuelang_go//encoding/yaml",
+    ],
+)
+
+go_test(
+    name = "cue_test",
+    srcs = [
+        "decoder_test.go",
+        "encoder_test.go",
+        "errors_test.go",
+        "integration_test.go",
+        "loader_test.go",
+        "validator_test.go",
+    ],
+    embed = [":cue"],
+    deps = [
+        "//cue/attributes",
+        "//errors",
+        "//fs/billy",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+        "@org_cuelang_go//cue",
+        "@org_cuelang_go//cue/cuecontext",
+    ],
+)

@@ -1,0 +1,6 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# gazelle:prefix
+# Note: No root prefix set. Each module sets its own prefix to prevent accidental local linking.
+
+gazelle(name = "gazelle")

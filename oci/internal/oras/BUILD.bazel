@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "oras",
+    srcs = [
+        "cache.go",
+        "client.go",
+        "interfaces.go",
+    ],
+    importpath = "github.com/jmgilman/go/oci/internal/oras",
+    visibility = ["//oci:__subpackages__"],
+    deps = [
+        "@com_github_opencontainers_go_digest//:go-digest",
+        "@com_github_opencontainers_image_spec//specs-go/v1:specs-go",
+        "@land_oras_oras_go_v2//:oras-go",
+        "@land_oras_oras_go_v2//registry/remote",
+        "@land_oras_oras_go_v2//registry/remote/auth",
+    ],
+)
+
+go_test(
+    name = "oras_test",
+    srcs = ["client_test.go"],
+    embed = [":oras"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@land_oras_oras_go_v2//registry/remote/auth",
+    ],
+)

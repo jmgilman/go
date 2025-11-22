@@ -6,7 +6,7 @@ require (
 	github.com/gobwas/glob v0.2.3
 	github.com/google/go-containerregistry v0.20.6
 	github.com/jmgilman/go/fs/billy v0.1.1
-	github.com/jmgilman/go/oci v0.0.0
+	github.com/jmgilman/go/oci v0.0.0-20251111054603-5667d6907f6d
 	github.com/sigstore/cosign/v2 v2.6.1
 	github.com/sigstore/rekor v1.4.2
 	github.com/sigstore/sigstore v1.9.6-0.20250729224751-181c5d3339b3
@@ -171,5 +171,3 @@ require (
 	gotest.tools/v3 v3.5.2 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 )
-
-replace github.com/jmgilman/go/oci => ../

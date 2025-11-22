@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/jmgilman/go/errors
+
+go_library(
+    name = "errors",
+    srcs = [
+        "classification.go",
+        "codes.go",
+        "constructors.go",
+        "context.go",
+        "doc.go",
+        "errors.go",
+        "helpers.go",
+        "json.go",
+        "platform_error.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/jmgilman/go/errors",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "errors_test",
+    srcs = [
+        "benchmark_test.go",
+        "classification_test.go",
+        "constructors_test.go",
+        "context_test.go",
+        "edge_cases_test.go",
+        "example_test.go",
+        "helpers_test.go",
+        "integration_test.go",
+        "json_test.go",
+        "platform_error_test.go",
+        "wrap_test.go",
+    ],
+    embed = [":errors"],
+    deps = ["@com_github_stretchr_testify//require"],
+)

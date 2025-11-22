@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "mocks",
+    srcs = ["oras_client.go"],
+    importpath = "github.com/jmgilman/go/oci/internal/oras/mocks",
+    visibility = ["//oci:__subpackages__"],
+    deps = ["//oci/internal/oras"],
+)
